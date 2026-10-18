@@ -56,3 +56,32 @@ index 07a0ec1..908adf5 100644
    }
  }
  
+diff --git a/lib/gfx/texture.cpp b/lib/gfx/texture.cpp
+index 8f0e0c1..b7c4a22 100644
+--- a/lib/gfx/texture.cpp
++++ b/lib/gfx/texture.cpp
+@@ -202,7 +202,11 @@ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat,
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::RenderAttachment,
++      // CopySrc: the picto box reads this copy back (pc_capture.cpp, GX_TF_RGBA8). Dawn's Vulkan
++      // copy needs the image created with TRANSFER_SRC. Without it the PS5 loses the device and
++      // Aurora's error callback aborts.
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst |
++               wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,
+@@ -234,7 +238,10 @@ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, c
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment,
++      // CopySrc: I8 and RGB565 picto-box copies (the formats that need conversion). Same readback
++      // as new_render_texture above.
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment |
++               wgpu::TextureUsage::CopySrc,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,

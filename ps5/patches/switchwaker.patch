@@ -221,6 +221,46 @@ index 355f0e7..57070e1 100644
  }
  
  /* 8003EFA4-8003EFC8       .text fpcMtd_Create__FP20process_method_classPv */
+diff --git a/native/sdk/tests/sdk_threads.cpp b/native/sdk/tests/sdk_threads.cpp
+index 26872bb..fef7063 100644
+--- a/native/sdk/tests/sdk_threads.cpp
++++ b/native/sdk/tests/sdk_threads.cpp
+@@ -130,6 +130,15 @@ void* BlockedReceiver(void*) {
+     return AsMessage(0xBAD); // not reached: cancelled while waiting
+ }
+ 
++// Ends only through OSExitThread, the path the picto box's capture thread takes.
++void* ExitOnlyThread(void*) {
++    OSExitThread(AsMessage(0xE417));
++    return AsMessage(0xBAD);
++}
++
++OSThread sExiter;
++Stack sExiterStack;
++
+ OSThread sPing, sPong, sCounters[kCounterThreads], sSleeper, sReceiver;
+ Stack sPingStack, sPongStack, sCounterStacks[kCounterThreads], sSleeperStack, sReceiverStack;
+ 
+@@ -170,6 +179,19 @@ void RearmHandler(OSAlarm* alarm, OSContext*) {
+ 
+ } // namespace
+ 
++// One OSCreateThread whose entry returns only through OSExitThread, then joined.
++COS_SMOKE_TEST(thread_exit) {
++    COS_SMOKE_CHECK(OSCreateThread(&sExiter, ExitOnlyThread, nullptr, sExiterStack.top(), kStackSize,
++                                   16, 0));
++    COS_SMOKE_CHECK(OSIsThreadSuspended(&sExiter));
++    COS_SMOKE_CHECK(OSResumeThread(&sExiter) == 1);
++    void* result = nullptr;
++    COS_SMOKE_CHECK(OSJoinThread(&sExiter, &result));
++    COS_SMOKE_CHECK(FromMessage(result) == 0xE417);
++    COS_SMOKE_CHECK(OSIsThreadTerminated(&sExiter));
++    return true;
++}
++
+ COS_SMOKE_TEST(threads) {
+     OSThread* self = OSGetCurrentThread();
+     COS_SMOKE_CHECK(self != nullptr);
 diff --git a/native/src/pc/features/pc_menu.cpp b/native/src/pc/features/pc_menu.cpp
 index 3a26b60..fb9c5f0 100644
 --- a/native/src/pc/features/pc_menu.cpp
@@ -317,6 +357,25 @@ index 43728f2..b3ce94c 100644
          if (!s.measured) {
              // Turned on a moment ago (options menu): nothing measured yet.
              ImGui::TextUnformatted("-- fps");
+diff --git a/native/src/pc/game_hooks/pc_capture.cpp b/native/src/pc/game_hooks/pc_capture.cpp
+index f69fa4d..f7b67f5 100644
+--- a/native/src/pc/game_hooks/pc_capture.cpp
++++ b/native/src/pc/game_hooks/pc_capture.cpp
+@@ -80,6 +80,14 @@ bool readTexture(const aurora::gfx::TextureHandle& handle, std::vector<uint8_t>&
+         return true;
+     }
+ #endif
++    // A copy texture without CopySrc is not a Vulkan transfer source. CopyTextureToBuffer then
++    // loses the device, and Aurora's uncaptured-error callback aborts (the picto box returns to
++    // the home menu). Skip the readback: writeGx leaves mid grey, which encode_s3tc accepts.
++    const auto copyUsage = static_cast<uint64_t>(handle->texture.GetUsage());
++    if ((copyUsage & static_cast<uint64_t>(wgpu::TextureUsage::CopySrc)) == 0) {
++        pc::writef(STDERR_FILENO, "[cos] capture: copy texture has no CopySrc usage; readback skipped\n");
++        return false;
++    }
+     const uint32_t width = handle->size.width;
+     const uint32_t height = handle->size.height;
+     const uint32_t bytesPerRow = (width * 4 + 255) & ~255u;
 diff --git a/native/src/pc/harness/pc_shot.cpp b/native/src/pc/harness/pc_shot.cpp
 index aef4e19..c2c3de0 100644
 --- a/native/src/pc/harness/pc_shot.cpp

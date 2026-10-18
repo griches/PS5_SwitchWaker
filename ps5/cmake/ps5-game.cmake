@@ -30,8 +30,12 @@ set(CMAKE_CXX_COMPILER_LAUNCHER sh ${ps5}/tools/cc-init-array.sh)
 # threads) are still experimental: tools/link-title.sh links libc++experimental.a
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fexperimental-library>)
 
-# The console: klog, the pad, the title's exit, and the libc names a title cannot import
-add_library(ps5_platform STATIC ${ps5}/src/platform.c ${ps5}/src/shims.c ${ps5}/src/startup.c)
+# The console: klog, the pad, the title's exit, and the libc names a title cannot import.
+# emutls.c is compiler-rt's, built with one skipped pthread destructor round and linked
+# whole, ahead of libclang_rt.builtins, so its __emutls_get_address replaces that copy.
+add_library(ps5_platform STATIC ${ps5}/src/platform.c ${ps5}/src/shims.c ${ps5}/src/startup.c
+		${ps5}/src/emutls.c)
+target_compile_definitions(ps5_platform PRIVATE EMUTLS_SKIP_DESTRUCTOR_ROUNDS=1)
 target_include_directories(ps5_platform PUBLIC ${ps5}/src)
 target_include_directories(ps5_platform PRIVATE ${SDL_DIR}/include)
 file(READ ${ps5}/sce_sys/param.json param_json)
