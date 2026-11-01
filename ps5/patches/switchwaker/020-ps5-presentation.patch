@@ -1,0 +1,336 @@
+diff --git a/native/include/pc/pc_settings.h b/native/include/pc/pc_settings.h
+index 4dc8bd76..fc7a7a1a 100644
+--- a/native/include/pc/pc_settings.h
++++ b/native/include/pc/pc_settings.h
+@@ -43,12 +43,24 @@ extern "C" {
+ 
+ typedef enum PcSettingTab {
+     PC_SETTING_TAB_GRAPHICS = 0,    /* "Gráficos" */
++#if defined(__PROSPERO__)
++    PC_SETTING_TAB_FX = 1,
++    PC_SETTING_TAB_GAMEPLAY = 2,    /* "Jugabilidad" */
++    PC_SETTING_TAB_PERFORMANCE = 3, /* "Rendimiento" */
++    PC_SETTING_TAB_DEBUG = 4,       /* "Depuración" */
++    PC_SETTING_TABS = 5,
++    // Upstream-only tabs: kept as API identifiers, never exposed or registered on PS5.
++    PC_SETTING_TAB_QOL = 5,
++    PC_SETTING_TAB_CONTROLS = 6,
++    PC_SETTING_TAB_SYSTEM = 7
++#else
+     PC_SETTING_TAB_PERFORMANCE = 1, /* "Rendimiento" */
+     PC_SETTING_TAB_QOL = 2,         /* "Calidad de vida" (pc_qol.h) */
+     PC_SETTING_TAB_DEBUG = 3,       /* "Depuración" */
+     PC_SETTING_TAB_CONTROLS = 4,    /* "Controles" (pc_button_remap.h, issue #15) */
+     PC_SETTING_TAB_SYSTEM = 5,      /* "Sistema" (pc_update.h, issues #27/#28) */
+     PC_SETTING_TABS = 6
++#endif
+ } PcSettingTab;
+ 
+ typedef enum PcOperationMode {
+@@ -142,6 +154,11 @@ int pc_settings_migrate_env_file(const char* envPath, const char* oldPath);
+ void pc_settings_set_mode_default(const char* key, PcOperationMode mode, const char* value);
+ /* Re-reads the file (menu: "Recargar ajustes") and applies what changed. */
+ void pc_settings_reload(void);
++#if defined(__PROSPERO__)
++/* Removes the config and reapplies defaults to every registered setting. Explicit
++   launch-environment overrides remain locked. Returns -1 if deletion fails. */
++int pc_settings_restore_defaults(void);
++#endif
+ /* The settings file's path. */
+ const char* pc_settings_path(void);
+ 
+diff --git a/native/src/pc/features/pc_precompile.cpp b/native/src/pc/features/pc_precompile.cpp
+index 28e98985..50285efc 100644
+--- a/native/src/pc/features/pc_precompile.cpp
++++ b/native/src/pc/features/pc_precompile.cpp
+@@ -106,6 +106,9 @@
+ #endif
+ 
+ #include "pc_precompile_gate.h"
++#if defined(__PROSPERO__)
++#include "pc/pc_shader_loading.h"
++#endif
+ 
+ namespace pc {
+ 
+@@ -404,6 +407,9 @@ constexpr ImGuiWindowFlags kPanelFlags = ImGuiWindowFlags_NoDecoration | ImGuiWi
+ // shaders (first start only): N/M, ~X s" (the whole warm-up; etaS < 0: no estimate yet), in the
+ // console's language, and a bar.
+ void drawLoadingPanel(uint32_t done, uint32_t total, bool all, double etaS) {
++#if defined(__PROSPERO__)
++    pc_ps5_shader_loading(done, total, etaS);
++#else
+     if (ImGui::GetCurrentContext() == nullptr) {
+         return;
+     }
+@@ -437,6 +443,7 @@ void drawLoadingPanel(uint32_t done, uint32_t total, bool all, double etaS) {
+         ImGui::ProgressBar(total != 0 ? (float)done / (float)total : 0.0f, ImVec2(width, 0.0f), "");
+     }
+     ImGui::End();
++#endif
+ }
+ 
+ // Fed to the loading screen: its done and total counts, and whether it is finished.
+diff --git a/native/src/pc/features/pc_settings.cpp b/native/src/pc/features/pc_settings.cpp
+index bc750ae4..21439b02 100644
+--- a/native/src/pc/features/pc_settings.cpp
++++ b/native/src/pc/features/pc_settings.cpp
+@@ -17,6 +17,7 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <map>
++#include <fcntl.h>
+ #include <set>
+ #include <string>
+ #include <sys/stat.h>
+@@ -52,6 +53,9 @@ struct Entry {
+ 
+ struct State {
+     bool loaded = false;
++#if defined(__PROSPERO__)
++    bool migrationBlocked = false; // never save over legacy values without a verified backup
++#endif
+     std::string path;
+     std::map<std::string, std::string> envAtStart; // COS_* (and MESA_*) variables before the file
+     std::set<std::string> fileSet;                 // variables pc_settings_load_early set
+@@ -139,10 +143,17 @@ bool devVariable(const std::string& line, std::string& name, std::string& value)
+     return !name.empty();
+ }
+ 
++#if defined(__PROSPERO__)
++void migratePs5Profile();
++#endif
++
+ // Parses the file into the entries' stored values and the [dev] lines (clearing the old ones
+ // first).
+ void readFile() {
+     State& s = st();
++#if defined(__PROSPERO__)
++    s.migrationBlocked = false;
++#endif
+     for (auto& [key, e] : s.entries) {
+         for (int i = 0; i < kSlots; i++) {
+             e.stored[i].clear();
+@@ -202,6 +213,9 @@ void readFile() {
+     }
+     pc::writef(STDERR_FILENO, "[cos] settings: %u value(s)%s from %s\n", count,
+                s.hasDev ? " and a [dev] section" : "", s.path.c_str());
++#if defined(__PROSPERO__)
++    migratePs5Profile();
++#endif
+ }
+ 
+ void makeParents(const std::string& path) {
+@@ -215,6 +229,9 @@ void makeParents(const std::string& path) {
+ 
+ bool writeFile() {
+     State& s = st();
++#if defined(__PROSPERO__)
++    if (s.migrationBlocked) return false;
++#endif
+     makeParents(s.path);
+     const std::string tmp = s.path + ".tmp";
+     FILE* f = fopen(tmp.c_str(), "w");
+@@ -222,12 +239,17 @@ bool writeFile() {
+         pc::writef(STDERR_FILENO, "[cos] settings: cannot write %s: %s\n", tmp.c_str(), strerror(errno));
+         return false;
+     }
++#if defined(__PROSPERO__)
++    fputs("# PS5 SwitchWaker settings. One NAME=value per setting.\n"
++          "# Touch pad opens the options menu. [dev] contains developer settings.\n", f);
++#else
+     fputs("# Ajustes de SwitchWaker, escritos por el menú de opciones\n"
+           "# (Menos en la Switch; F1 o L+R+Z en el Mac). Una línea NOMBRE=valor, o\n"
+           "# NOMBRE@handheld= / NOMBRE@docked= para los valores de cada modo. Una sección [dev]\n"
+           "# al final guarda variables de desarrollo NOMBRE=valor (al arrancar); el menú la\n"
+           "# conserva tal cual. En el Mac, las variables de entorno mandan sobre este archivo.\n",
+           f);
++#endif
+     for (const auto& [key, e] : s.entries) {
+         for (int i = 0; i < kSlots; i++) {
+             if (!e.has[i]) {
+@@ -246,8 +268,8 @@ bool writeFile() {
+             fprintf(f, "%s\n", line.c_str());
+         }
+     }
+-    const bool ok = fflush(f) == 0;
+-    fclose(f);
++    bool ok = fflush(f) == 0;
++    if (fclose(f) != 0) ok = false;
+ #ifdef __SWITCH__
+     // Horizon's rename does not replace an existing file (EEXIST): drop the old one first. A kill
+     // between the two calls leaves only the .tmp, and the next save writes it again.
+@@ -262,6 +284,101 @@ bool writeFile() {
+     return true;
+ }
+ 
++#if defined(__PROSPERO__)
++// Only these upstream settings ever had a mode-specific PS5 player value.
++const char* const kPs5ProfileKeys[] = {"COS_FB_SCALE", "COS_DYNRES", "COS_HD_MAX_SIZE", "COS_FPS60"};
++
++bool sameFileContents(const std::string& left, const std::string& right) {
++    FILE* a = fopen(left.c_str(), "rb");
++    FILE* b = fopen(right.c_str(), "rb");
++    if (!a || !b) { if (a) fclose(a); if (b) fclose(b); return false; }
++    bool same = true;
++    char x[4096], y[4096];
++    for (;;) {
++        const size_t nx = fread(x, 1, sizeof(x), a), ny = fread(y, 1, sizeof(y), b);
++        if (nx != ny || memcmp(x, y, nx) != 0) { same = false; break; }
++        if (nx < sizeof(x)) { same = !ferror(a) && !ferror(b); break; }
++    }
++    fclose(a); fclose(b);
++    return same;
++}
++
++bool backupPs5Profile() {
++    const std::string base = st().path + ".pre-ps5-profile.bak";
++    // Reuse an identical backup on a retry. A newly copied legacy file gets its own backup.
++    for (unsigned int index = 0; index < 1000; ++index) {
++        const std::string path = base + (index ? "." + std::to_string(index) : "");
++        const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
++        if (fd < 0) {
++            if (errno != EEXIST) return false;
++            if (sameFileContents(st().path, path)) return true;
++            continue;
++        }
++        FILE* source = fopen(st().path.c_str(), "rb");
++        FILE* target = fdopen(fd, "wb");
++        bool ok = source && target;
++        if (ok) {
++            char data[4096];
++            size_t n;
++            while ((n = fread(data, 1, sizeof(data), source)) != 0) {
++                if (fwrite(data, 1, n, target) != n) { ok = false; break; }
++            }
++            ok = ok && !ferror(source);
++            if (fflush(target) != 0) ok = false;
++        }
++        if (source && fclose(source) != 0) ok = false;
++        if (target) { if (fclose(target) != 0) ok = false; }
++        else close(fd);
++        if (!ok) { remove(path.c_str()); return false; }
++        return true;
++    }
++    return false;
++}
++
++void migratePs5Profile() {
++    State& s = st();
++    const char* modeEnv = getenv("COS_OPERATION_MODE");
++    bool handheld = modeEnv && strcmp(modeEnv, "handheld") == 0;
++    bool changed = handheld;
++    if (auto it = s.entries.find("COS_OPERATION_MODE"); it != s.entries.end()) {
++        if (it->second.has[0]) handheld = it->second.stored[0] == "handheld";
++        s.entries.erase(it); changed = true;
++    }
++    // The old loader applied [dev] after its initial file values, and mode polling
++    // later adopted that override. Preserve that final active profile, not the editor selection.
++    std::vector<std::string> dev;
++    for (const auto& line : s.devLines) {
++        std::string key, value;
++        if (devVariable(line, key, value) && key == "COS_OPERATION_MODE") {
++            handheld = value == "handheld"; changed = true;
++        } else dev.push_back(line);
++    }
++    s.devLines = std::move(dev);
++    const int slot = handheld ? 1 + PC_MODE_HANDHELD : 1 + PC_MODE_DOCKED;
++    for (const char* key : kPs5ProfileKeys) {
++        Entry& e = s.entries[key];
++        changed = changed || e.has[1] || e.has[2];
++        if (e.has[slot]) { e.stored[0] = e.stored[slot]; e.has[0] = true; }
++        for (int i = 1; i < kSlots; ++i) { e.stored[i].clear(); e.has[i] = false; }
++        // Auto is PS5's fixed 1024 cap now; retain a legacy handheld's actual 512 cap.
++        if (handheld && strcmp(key, "COS_HD_MAX_SIZE") == 0 &&
++            (!e.has[0] || e.stored[0].empty() || e.stored[0] == "auto")) {
++            e.stored[0] = "512"; e.has[0] = true;
++        }
++    }
++    setenv("COS_OPERATION_MODE", "docked", 1);
++    if (!changed) return;
++    // The normalized in-memory values are safe even if persistence fails. Block
++    // later menu writes so they cannot accidentally discard unbacked legacy values.
++    if (!backupPs5Profile() || !writeFile()) {
++        s.migrationBlocked = true;
++        pc::writef(STDERR_FILENO, "[cos] settings: PS5 profile migration could not be saved; original retained, saves disabled until reload/restart\n");
++    } else {
++        pc::writef(STDERR_FILENO, "[cos] settings: migrated active %s profile; backup beside settings.ini\n", handheld ? "handheld" : "docked");
++    }
++}
++#endif
++
+ Entry* find(const char* key) {
+     if (key == nullptr) {
+         return nullptr;
+@@ -358,7 +475,9 @@ void sortOrder() {
+ }
+ 
+ PcOperationMode queryMode() {
+-#if defined(__SWITCH__)
++#if defined(__PROSPERO__)
++    return PC_MODE_DOCKED; // one PS5 configuration; legacy mode is read only by migration
++#elif defined(__SWITCH__)
+     return cos_switch_docked() ? PC_MODE_DOCKED : PC_MODE_HANDHELD;
+ #else
+     const char* v = getenv("COS_OPERATION_MODE");
+@@ -545,6 +664,40 @@ void pc_settings_reload(void) {
+     }
+ }
+ 
++#if defined(__PROSPERO__)
++int pc_settings_restore_defaults(void) {
++    State& s = st();
++    computePath();
++    // Do not change live settings unless removing the saved configuration succeeds.
++    if (remove(s.path.c_str()) != 0 && errno != ENOENT) return -1;
++    for (const auto& line : s.devLines) {
++        std::string key, value;
++        if (devVariable(line, key, value) && !isLocked(key.c_str())) unsetenv(key.c_str());
++    }
++    for (const auto& key : s.fileSet) {
++        if (!isLocked(key.c_str())) unsetenv(key.c_str());
++    }
++    s.fileSet.clear();
++    for (auto& [key, entry] : s.entries) {
++        for (int slot = 0; slot < kSlots; ++slot) {
++            entry.stored[slot].clear();
++            entry.has[slot] = false;
++        }
++    }
++    s.hasDev = false;
++    s.devLines.clear();
++    s.migrationBlocked = false;
++    // Reapply even unchanged values: a reset must also repair stale live state.
++    // Keep bootValue intact so startup-only changes still report restart pending.
++    const auto keys = s.order;
++    for (const auto& key : keys) {
++        const std::string value = valueFor(key.c_str(), s.lastMode);
++        notify(s.entries[key], key.c_str(), value);
++    }
++    return 0;
++}
++#endif
++
+ const char* pc_settings_path(void) {
+     computePath();
+     return st().path.c_str();
+@@ -558,6 +711,9 @@ int pc_settings_register(const PcSettingDesc* desc) {
+     Entry& e = s.entries[desc->key];
+     const bool fresh = !e.registered;
+     e.desc = *desc;
++#if defined(__PROSPERO__)
++    e.desc.flags &= ~PC_SETTING_PER_MODE;
++#endif
+     e.registered = true;
+     if (fresh) {
+         s.order.push_back(desc->key);
+@@ -584,6 +740,9 @@ const char* pc_settings_get_mode(const char* key, PcOperationMode mode) {
+ int pc_settings_set_mode(const char* key, PcOperationMode mode, const char* value) {
+     State& s = st();
+     Entry* e = find(key);
++#if defined(__PROSPERO__)
++    if (s.migrationBlocked) return -1;
++#endif
+     if (e == nullptr || !e->registered || isLocked(key) || value == nullptr || mode < 0 || mode >= PC_MODES) {
+         return -1;
+     }

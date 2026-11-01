@@ -436,3 +436,19 @@ audio_stop(void)
    (void)sceAudioOutClose(audio_port);
    audio_port = -1;
 }
+
+/* PS5/PS4 SystemService language IDs; unsupported PAL languages fall back to English. */
+int sceSystemServiceParamGetInt(int parameter, int *value);
+const char *ps5_system_language(void)
+{
+   int language = 1;
+   if (sceSystemServiceParamGetInt(1, &language) != 0)
+      return "en";
+   switch (language) {
+   case 2: case 22: return "fr";
+   case 3: case 20: return "es";
+   case 4: return "de";
+   case 5: return "it";
+   default: return "en";
+   }
+}
