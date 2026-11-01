@@ -7,9 +7,9 @@
 #   pic-source.png    ->  ps5/sce_sys/pic0.dds    the background behind the title, 3840x2160
 #                     ->  ps5/sce_sys/pic1.dds    the splash while it starts
 #
-# Both pictures are the port's own (a sailing boat on a cel-shaded sea, made for it
-# by Gary Riches with an image generator): nothing in them
-# is from the game.
+# The icon contains only the centered sail-and-wave mark. The background/splash
+# uses an ocean illustration generated for this port.
+# pic-source.png is the original 1672x941 image, scaled to the console's 4K format.
 # Needs Python with Pillow and numpy.
 #
 # SPDX-License-Identifier: MIT
