@@ -1,0 +1,1694 @@
+diff --git a/game/include/d/actor/d_a_player_main.h b/game/include/d/actor/d_a_player_main.h
+index 938f3b5e..92e0e1d8 100644
+--- a/game/include/d/actor/d_a_player_main.h
++++ b/game/include/d/actor/d_a_player_main.h
+@@ -1857,6 +1857,11 @@ public:
+             mCurProc == daPyProc_GRAB_UP_e ||
+             mCurProc == daPyProc_GRAB_THROW_e;
+     }
++#if TARGET_PC && defined(__PROSPERO__)
++    BOOL ps5JumpAllowed();
++#endif
++    f32 getNormalRunSpeed() const;
++    f32 getNormalRunAnimationRate() const;
+     BOOL checkNoControll() const { return dComIfGp_getPlayer(0) != this; }
+     void exchangeGrabActor(fopAc_ac_c* actor) { mActorKeepGrab.setData(actor); }
+     const cXyz& getDekuLeafWindPos() const { return mFanWindCps.GetStart(); }
+diff --git a/game/include/d/d_camera.h b/game/include/d/d_camera.h
+index aaabe3f8..ef95f739 100644
+--- a/game/include/d/d_camera.h
++++ b/game/include/d/d_camera.h
+@@ -528,6 +528,10 @@ public:
+     fopAc_ac_c* getMsgCmdSpeaker();
+     int getMsgCmdCut();
+     bool talktoCamera(s32);
++#if TARGET_PC && defined(__PROSPERO__)
++    bool ps5CameraControlled();
++    void ps5CameraPad();
++#endif
+     bool CalcSubjectAngle(s16*, s16*);
+     bool subjectCamera(s32);
+     bool towerCamera(s32);
+diff --git a/game/src/d/actor/d_a_agbsw0.cpp b/game/src/d/actor/d_a_agbsw0.cpp
+index d15c02e0..5845b782 100644
+--- a/game/src/d/actor/d_a_agbsw0.cpp
++++ b/game/src/d/actor/d_a_agbsw0.cpp
+@@ -4,6 +4,9 @@
+ //
+ 
+ #include "d/dolzel_rel.h" // IWYU pragma: keep
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "global.h"
+ #include "d/actor/d_a_agbsw0.h"
+ #include "f_op/f_op_actor_mng.h"
+@@ -1132,6 +1135,11 @@ BOOL daAgbsw0_c::ExeSubMW() {
+ /* 00001AD0-00001CC8       .text ExeSubT__10daAgbsw0_cFv */
+ BOOL daAgbsw0_c::ExeSubT() {
+     u8 sw0 = getSw0();
++#if TARGET_PC && defined(__PROSPERO__)
++    const bool ordinaryBombs = pc_gameplay_enabled(PC_GAMEPLAY_TINGLE_CHESTS);
++#else
++    const bool ordinaryBombs = false;
++#endif
+ 
+     if(sw0 != 0xFF && fopAcM_isSwitch(this, sw0)) {
+         if(mTimer == 0) {
+@@ -1153,6 +1161,15 @@ BOOL daAgbsw0_c::ExeSubT() {
+         return true;
+     }
+     else {
++#if defined(__PROSPERO__)
++        if(ordinaryBombs || mDoGaC_GbaLink()) {
++            if(ordinaryBombs || mDoGac_SendStatusCheck(0xF)) {
++                if(mCyl.ChkTgHit() && mCyl.GetTgHitAc() && fopAcM_GetName(mCyl.GetTgHitAc()) == fpcNm_BOMB_e && (ordinaryBombs || ((daBomb_c*)mCyl.GetTgHitAc())->chk_state(daBomb_c::STATE_8))) {
++                    if (mDoGaC_GbaLink()) {
++                        mSE = BigLittleChange(0x12);
++                        mDoGac_SendDataSet(&mSE, 4, 0xF, 0);
++                    }
++#else
+ #if TARGET_PC
+         // QoL "Cofres de Tingle sin Tingle Tuner" (pc_qol.h; BetterWW tingle_chests_without_tuner.asm):
+         // no GBA link needed, and any bomb reveals the chest, not only a Tingle Bomb
+@@ -1170,6 +1187,7 @@ BOOL daAgbsw0_c::ExeSubT() {
+                 if(mCyl.ChkTgHit() && mCyl.GetTgHitAc() && fopAcM_GetName(mCyl.GetTgHitAc()) == fpcNm_BOMB_e && ((daBomb_c*)mCyl.GetTgHitAc())->chk_state(daBomb_c::STATE_8)) {
+                     mSE = BigLittleChange(0x12);
+                     mDoGac_SendDataSet(&mSE, 4, 0xF, 0);
++#endif
+ #endif
+                     fopAcM_onSwitch(this, sw0);
+                     if(getMsgNo() == 0xFFFF) {
+diff --git a/game/src/d/actor/d_a_himo2.cpp b/game/src/d/actor/d_a_himo2.cpp
+index e6ee3c32..65ac5bd7 100644
+--- a/game/src/d/actor/d_a_himo2.cpp
++++ b/game/src/d/actor/d_a_himo2.cpp
+@@ -3,6 +3,9 @@
+  * Item - Grappling Hook / ロープ (Rope)
+  */
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #include "d/actor/d_a_bk.h"
+ #include "d/actor/d_a_player_main.h"
+@@ -844,6 +847,11 @@ static void pl_pos_add(himo2_class* i_this) {
+ 
+ /* 800ED6F4-800F0038       .text new_himo2_move__FP11himo2_class */
+ static void new_himo2_move(himo2_class* i_this) {
++#if TARGET_PC && defined(__PROSPERO__)
++    if (i_this->m02DC == 0) pc_gameplay_begin_action(PC_GAMEPLAY_FASTER_GRAPPLE);
++    const PcGrappleTuning grapple = pc_gameplay_grapple_tuning(
++        pc_gameplay_enabled(PC_GAMEPLAY_FASTER_GRAPPLE));
++#endif
+     fopAc_ac_c* actor = (fopAc_ac_c*)&i_this->actor;
+     fopAc_ac_c* player_actor;
+     daPy_py_c* player;
+@@ -982,7 +990,9 @@ static void new_himo2_move(himo2_class* i_this) {
+         if (fopAcM_GetParam(actor) == 1) {
+             i_this->m2500 = 0.0f;
+             i_this->m02E4 = 0.0f;
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++            i_this->m0308 = REG0_S(2) + grapple.firstPersonFrames;
++#elif TARGET_PC
+             // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): the first-person
+             // throw extends for 20 frames instead of 40
+             i_this->m0308 = REG0_S(2) + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 20 : 0x28);
+@@ -1057,7 +1067,9 @@ static void new_himo2_move(himo2_class* i_this) {
+                 i_this->m217C = r24;
+                 i_this->m2180 = fopAcM_GetID(r24);
+             } else {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++                i_this->m0308 = REG0_S(2) + grapple.thirdPersonFrames;
++#elif TARGET_PC
+                 // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): the
+                 // third-person throw extends for 10 frames instead of 20
+                 i_this->m0308 = REG0_S(2) + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 10 : 20);
+@@ -1106,7 +1118,9 @@ static void new_himo2_move(himo2_class* i_this) {
+             actor->current.angle.y = cM_atan2s(f31, f28_2);
+             actor->current.angle.x = -cM_atan2s(f27_4, f27_2);
+         }
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        actor->speedF = grapple.throwSpeed;
++#elif TARGET_PC
+         // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): thrown at 40
+         // instead of 20
+         actor->speedF = pc_qol(PC_QOL_FAST_GRAPPLE) ? 40.0f : 20.0f;
+@@ -1382,7 +1396,9 @@ static void new_himo2_move(himo2_class* i_this) {
+     }
+     case 2: {
+         cLib_addCalc0(&i_this->m24B8, 1.0f, (REG0_F(7) + 3.0f));
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        cLib_addCalc2(&i_this->m24B4, -144.0f, 1.0f, grapple.dropSpeed);
++#elif TARGET_PC
+         // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): it falls onto
+         // its target at 20 instead of 10
+         cLib_addCalc2(&i_this->m24B4, -144.0f, 1.0f, pc_qol(PC_QOL_FAST_GRAPPLE) ? 20.0f : 10.0f);
+@@ -1391,7 +1407,9 @@ static void new_himo2_move(himo2_class* i_this) {
+ #endif
+         if (i_this->m24B4 > -145.0f) {
+             if (i_this->m24BC < 400) {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++                f32 f1 = 20.0f - (i_this->m217C->scale.y - 1.0f) * grapple.wrapScale;
++#elif TARGET_PC
+                 // QoL "Garfio más rápido": wraps around its target with 25 instead of 17
+                 f32 f1 = 20.0f - (i_this->m217C->scale.y - 1.0f) * (pc_qol(PC_QOL_FAST_GRAPPLE) ? 25.0f : 17.0f);
+ #else
+@@ -1401,7 +1419,9 @@ static void new_himo2_move(himo2_class* i_this) {
+                     f1 = 0.5f;
+                 }
+                 int r3 = (i_this->m24C4 / f1);
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++                int r5 = r3 + grapple.wrapCounterStep;
++#elif TARGET_PC
+                 // QoL "Garfio más rápido" (pc_qol.h; wwrando increase_grapple_animation_speed): the wrap
+                 // counter goes up by 6 a frame instead of 1
+                 int r5 = r3 + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 6 : 1);
+diff --git a/game/src/d/actor/d_a_obj_ftree.cpp b/game/src/d/actor/d_a_obj_ftree.cpp
+index 1608887e..79c61da0 100644
+--- a/game/src/d/actor/d_a_obj_ftree.cpp
++++ b/game/src/d/actor/d_a_obj_ftree.cpp
+@@ -4,6 +4,9 @@
+  */
+ 
+ #include "d/dolzel_rel.h" // IWYU pragma: keep
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "d/actor/d_a_obj_ftree.h"
+ #include "d/d_com_inf_game.h"
+ #include "d/d_item_data.h"
+@@ -604,7 +607,11 @@ BOOL daObjFtree::Act_c::action_waitM_init(s16) {
+ 
+ /* 0000173C-00001878       .text action_waitM_main__Q210daObjFtree5Act_cFv */
+ void daObjFtree::Act_c::action_waitM_main() {
+-    if (dComIfGs_getFwaterTimer() == 0) {
++    if (dComIfGs_getFwaterTimer() == 0
++#if TARGET_PC && defined(__PROSPERO__)
++        && !pc_gameplay_enabled(PC_GAMEPLAY_KEEP_WATERED_TREES)
++#endif
++    ) {
+         _ftree_seach_info_ info;
+         get_ftree_info(&info);
+         if (info.mTotal != info.mBrought) {
+diff --git a/game/src/d/actor/d_a_obj_movebox.cpp b/game/src/d/actor/d_a_obj_movebox.cpp
+index 1da32966..b08c4e91 100644
+--- a/game/src/d/actor/d_a_obj_movebox.cpp
++++ b/game/src/d/actor/d_a_obj_movebox.cpp
+@@ -3,6 +3,9 @@
+  * Object - Pushable Box
+  */
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "d/dolzel_rel.h" // IWYU pragma: keep
+ #include "d/actor/d_a_obj_movebox.h"
+ #include "res/Object/Ecube.h"
+@@ -1601,7 +1604,11 @@ void Act_c::mode_wait() {
+         ((daPy_py_c*)dComIfGp_getPlayer(0))->onPushPullKeep();
+         mode_walk_init();
+         
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        const int originalFrames = cLib_checkBit(mPPLabel, dBgW::PPLABEL_PULL) ? attr()->m0A : attr()->m04;
++        m644 = pc_gameplay_block_frames(originalFrames, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_BLOCK_PUSH));
++        m630 = (f32)0x8000 / m644;
++#elif TARGET_PC
+         // QoL "Empujar bloques más rápido" (pc_qol.h; wwrando increase_block_moving_animation): every
+         // block type moves one step in 12 frames instead of its m04 / m0A (20)
+         const s16 pullFrames = pc_qol(PC_QOL_FAST_BLOCKS) ? 12 : attr()->m0A;
+diff --git a/game/src/d/actor/d_a_player_bottle.inc b/game/src/d/actor/d_a_player_bottle.inc
+index 717c2426..1d85a9f5 100644
+--- a/game/src/d/actor/d_a_player_bottle.inc
++++ b/game/src/d/actor/d_a_player_bottle.inc
+@@ -483,7 +483,12 @@ BOOL daPy_lk_c::procBottleSwing() {
+                         mGameOverId = fpcM_ERROR_PROCESS_ID_e;
+                         mProcVar7.m3574 = 1;
+                     } else {
++#if TARGET_PC && defined(__PROSPERO__)
++                        dComIfGs_getpItemRecord()->resetTimer(pc_gameplay_forest_water_frames(36000,
++                            pc_gameplay_enabled(PC_GAMEPLAY_FOREST_WATER_30_MINUTES)));
++#else
+                         dComIfGs_getpItemRecord()->resetTimer(36000);
++#endif
+                     }
+                 }
+             }
+diff --git a/game/src/d/actor/d_a_player_climb.inc b/game/src/d/actor/d_a_player_climb.inc
+index 376fdda0..3bf8ebd2 100644
+--- a/game/src/d/actor/d_a_player_climb.inc
++++ b/game/src/d/actor/d_a_player_climb.inc
+@@ -210,7 +210,9 @@ void daPy_lk_c::checkBgClimbMove() {
+ 
+ /* 80136588-801365F4       .text procClimbUpStart_init_sub__9daPy_lk_cFv */
+ void daPy_lk_c::procClimbUpStart_init_sub() {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    setSingleMoveAnime(ANM_LADDERUPST, pc_gameplay_traversal_rate(m_HIO->mLadder.m.field_0x4, PC_TRAVERSAL_LADDER_START, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL)), 0.0f, -1, m_HIO->mLadder.m.field_0x8);
++#elif TARGET_PC
+     // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): getting on a vine wall at
+     // 1.6 instead of 1.0
+     setSingleMoveAnime(ANM_LADDERUPST, pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mLadder.m.field_0x4, 0.0f, -1,
+diff --git a/game/src/d/actor/d_a_player_crawl.inc b/game/src/d/actor/d_a_player_crawl.inc
+index 9a7ea789..41b76706 100644
+--- a/game/src/d/actor/d_a_player_crawl.inc
++++ b/game/src/d/actor/d_a_player_crawl.inc
+@@ -31,6 +31,13 @@ f32 daPy_lk_c::getCrawlMoveSpeed() {
+     if (fVar1 >= 17.0f) {
+         fVar1 = fVar1 - 17.0f;
+     }
++#if defined(__PROSPERO__)
++    f32 crawlSpeed = m_HIO->mCrouch.m.field_0x3C;
++#if TARGET_PC && defined(__PROSPERO__)
++    crawlSpeed = pc_gameplay_crawl_speed(crawlSpeed, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_MOVEMENT));
++#endif
++    return (crawlSpeed * mFrameCtrlUnder[UNDER_MOVE0_e].getRate()) * cM_fsin((M_PI / 17) * fVar1);
++#else
+ #if TARGET_PC
+     // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_player_movement_speeds):
+     // crawling at twice the speed (6.0 instead of 3.0)
+@@ -39,6 +46,7 @@ f32 daPy_lk_c::getCrawlMoveSpeed() {
+ #else
+     return (m_HIO->mCrouch.m.field_0x3C * mFrameCtrlUnder[UNDER_MOVE0_e].getRate()) * cM_fsin((M_PI / 17) * fVar1);
+ #endif
++#endif
+ }
+ 
+ /* 80138868-801389D0       .text setCrawlMoveDirectionArrow__9daPy_lk_cFv */
+diff --git a/game/src/d/actor/d_a_player_dproc.inc b/game/src/d/actor/d_a_player_dproc.inc
+index 653b45bd..54fd83d1 100644
+--- a/game/src/d/actor/d_a_player_dproc.inc
++++ b/game/src/d/actor/d_a_player_dproc.inc
+@@ -1522,6 +1522,9 @@ BOOL daPy_lk_c::dProcDoorOpen_init() {
+     if (mCurProc == daPyProc_DEMO_DOOR_OPEN_e) {
+         return true;
+     }
++#if TARGET_PC && defined(__PROSPERO__)
++    if (dComIfGp_getLinkPlayer() == this) pc_quick_doors_begin();
++#endif
+     commonProcInit(daPyProc_DEMO_DOOR_OPEN_e);
+ 
+     daPy_ANM anm;
+@@ -1548,6 +1551,15 @@ BOOL daPy_lk_c::dProcDoorOpen_init() {
+ 
+ /* 8013098C-80130A54       .text dProcDoorOpen__9daPy_lk_cFv */
+ BOOL daPy_lk_c::dProcDoorOpen() {
++#if TARGET_PC && defined(__PROSPERO__)
++    if (dComIfGp_getLinkPlayer() == this) {
++        float under = mFrameCtrlUnder[UNDER_MOVE0_e].getRate();
++        float upper = mFrameCtrlUpper[UPPER_MOVE0_e].getRate();
++        pc_quick_doors_speed_walk(under, upper);
++        mFrameCtrlUnder[UNDER_MOVE0_e].setRate(under);
++        mFrameCtrlUpper[UPPER_MOVE0_e].setRate(upper);
++    }
++#endif
+     if (mFrameCtrlUnder[UNDER_MOVE0_e].getRate() < 0.01f) {
+         mAcch.ClrWallNone();
+         mAcch.OffLineCheckNone();
+diff --git a/game/src/d/actor/d_a_player_hang.inc b/game/src/d/actor/d_a_player_hang.inc
+index 0b1f9703..36e86577 100644
+--- a/game/src/d/actor/d_a_player_hang.inc
++++ b/game/src/d/actor/d_a_player_hang.inc
+@@ -601,7 +601,9 @@ BOOL daPy_lk_c::procHangWallCatch_init() {
+     commonProcInit(daPyProc_HANG_WALL_CATCH_e);
+     setSingleMoveAnime(
+         ANM_VJMPCHB,
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        pc_gameplay_traversal_rate(m_HIO->mWallCatch.m.field_0x1C, PC_TRAVERSAL_LEDGE_START, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL)),
++#elif TARGET_PC
+         // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): climbing up a ledge
+         // starts at 1.6 instead of 0.8
+         pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mWallCatch.m.field_0x1C,
+diff --git a/game/src/d/actor/d_a_player_ladder.inc b/game/src/d/actor/d_a_player_ladder.inc
+index f9f12e72..d1211098 100644
+--- a/game/src/d/actor/d_a_player_ladder.inc
++++ b/game/src/d/actor/d_a_player_ladder.inc
+@@ -16,7 +16,9 @@
+ 
+ /* 80132F34-80132F58       .text getLadderMoveAnmSpeed__9daPy_lk_cFv */
+ f32 daPy_lk_c::getLadderMoveAnmSpeed() {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    return getAnmSpeedStickRate(m_HIO->mLadder.m.field_0x28, pc_gameplay_traversal_rate(m_HIO->mLadder.m.field_0x24, PC_TRAVERSAL_LADDER_MOVE, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL)));
++#elif TARGET_PC
+     // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): ladders and vines
+     // climbed at up to 1.6 instead of 1.2
+     return getAnmSpeedStickRate(m_HIO->mLadder.m.field_0x28,
+@@ -97,7 +99,9 @@ int daPy_lk_c::setMoveBGLadderCorrect() {
+ 
+ /* 801333A8-80133414       .text procLadderUpStart_init_sub__9daPy_lk_cFv */
+ void daPy_lk_c::procLadderUpStart_init_sub() {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    setSingleMoveAnime(ANM_LADDERUPST, pc_gameplay_traversal_rate(m_HIO->mLadder.m.field_0x4, PC_TRAVERSAL_LADDER_START, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL)), 0.0f, -1, m_HIO->mLadder.m.field_0x8);
++#elif TARGET_PC
+     // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): getting on a ladder at 1.6
+     // instead of 1.0
+     setSingleMoveAnime(ANM_LADDERUPST, pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mLadder.m.field_0x4, 0.0f, -1,
+@@ -186,7 +190,9 @@ BOOL daPy_lk_c::procLadderUpEnd_init(BOOL param_0) {
+     } else {
+         anm = ANM_LADDERUPEDR;
+     }
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    setSingleMoveAnime(anm, pc_gameplay_traversal_rate(m_HIO->mLadder.m.field_0xC, PC_TRAVERSAL_LADDER_END, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL)), 0.0f, -1, m_HIO->mLadder.m.field_0x10);
++#elif TARGET_PC
+     // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): getting off a
+     // ladder at 1.4 instead of 0.9
+     setSingleMoveAnime(anm, pc_qol(PC_QOL_FAST_CLIMB) ? 1.4f : m_HIO->mLadder.m.field_0xC, 0.0f, -1,
+diff --git a/game/src/d/actor/d_a_player_main.cpp b/game/src/d/actor/d_a_player_main.cpp
+index 07bb2497..0a35b49a 100644
+--- a/game/src/d/actor/d_a_player_main.cpp
++++ b/game/src/d/actor/d_a_player_main.cpp
+@@ -8,6 +8,12 @@
+  * The original split locations are indicated in the map file.
+  */
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#include "pc/pc_player_controls.h"
++#include "pc/pc_quick_doors.h"
++#include "d/d_meter.h"
++#endif
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #include "d/actor/d_a_player_main.h"
+ #include "d/actor/d_a_demo_item.h"
+@@ -2779,6 +2785,23 @@ void daPy_lk_c::setBodyAngleXReadyAnime() {
+     cLib_addCalcAngleS(&mBodyAngle.x, sVar3, 4, 0xc00, 0x180);
+ }
+ 
++// Bluewake changes these two move parameters globally. Accessors provide the same
++// reads without writing the native port's const shared HIO tables.
++f32 daPy_lk_c::getNormalRunSpeed() const {
++#if TARGET_PC && defined(__PROSPERO__)
++    return pc_player_controls_run_tuning(m_HIO->mMove.m.field_0x18);
++#else
++    return m_HIO->mMove.m.field_0x18;
++#endif
++}
++f32 daPy_lk_c::getNormalRunAnimationRate() const {
++#if TARGET_PC && defined(__PROSPERO__)
++    return pc_player_controls_run_tuning(m_HIO->mMove.m.field_0x48);
++#else
++    return m_HIO->mMove.m.field_0x48;
++#endif
++}
++
+ /* 8010A4D4-8010A96C       .text setSpeedAndAngleNormal__9daPy_lk_cFs */
+ void daPy_lk_c::setSpeedAndAngleNormal(s16 param_1) {
+     f32 dVar11;
+@@ -3209,15 +3232,15 @@ void daPy_lk_c::setBlendMoveAnime(f32 i_morf) {
+             }
+         } else if (f30 < m_HIO->mMove.m.field_0x30) {
+             f1 = (f30 - m_HIO->mMove.m.field_0x2C) / (m_HIO->mMove.m.field_0x30 - m_HIO->mMove.m.field_0x2C);
+-            setMoveAnime(f1, f29, m_HIO->mMove.m.field_0x48, anm1, anm2, 1, i_morf);
++            setMoveAnime(f1, f29, getNormalRunAnimationRate(), anm1, anm2, 1, i_morf);
+             m3598 = (f28 * (1.0f - f1));
+         } else {
+             f32 f1;
+             if (f31 >= SQUARE(13.0f)) {
+-                f1 = 1.7f * m_HIO->mMove.m.field_0x48;
++                f1 = 1.7f * getNormalRunAnimationRate();
+                 onResetFlg0(daPyRFlg0_UNK40000);
+             } else {
+-                f1 = m_HIO->mMove.m.field_0x48;
++                f1 = getNormalRunAnimationRate();
+             }
+             setMoveAnime(1.0f, f1, f1, anm2, anm2, 1, i_morf);
+             m3598 = 0.0f;
+@@ -3357,7 +3380,7 @@ void daPy_lk_c::setBlendAtnMoveAnime(f32 i_morf) {
+         mMaxNormalSpeed = m_HIO->mAtnMoveB.m.field_0xC;
+         setBlendAtnBackMoveAnime(i_morf);
+     } else if (uVar2 == DIR_FORWARD) {
+-        mMaxNormalSpeed = m_HIO->mMove.m.field_0x18;
++        mMaxNormalSpeed = getNormalRunSpeed();
+         setBlendMoveAnime(i_morf);
+     } else {
+         daPy_ANM anm0;
+@@ -4467,7 +4490,7 @@ BOOL daPy_lk_c::checkNextMode(int r29) {
+     if (r24) {
+         mMaxNormalSpeed = m_HIO->mAtnMove.m.field_0xC;
+     } else {
+-        mMaxNormalSpeed = m_HIO->mMove.m.field_0x18;
++        mMaxNormalSpeed = getNormalRunSpeed();
+     }
+     
+     if (changeSlideProc()) {
+@@ -4978,7 +5001,7 @@ BOOL daPy_lk_c::changeLandProc(f32 i_anmSpeed) {
+     {
+         voiceStart(7);
+         if (direction == DIR_FORWARD) {
+-            speedF = m_HIO->mMove.m.field_0x18;
++            speedF = getNormalRunSpeed();
+             procFrontRoll_init(m_HIO->mFall.m.field_0x38);
+         } else {
+             procSideRoll_init();
+@@ -5047,7 +5070,7 @@ BOOL daPy_lk_c::checkNormalDamage(int param_1) {
+ 
+ /* 80110448-801104E4       .text setDashDamage__9daPy_lk_cFv */
+ void daPy_lk_c::setDashDamage() {
+-    setActAnimeUpper(dRes_INDEX_LKANM_BCK_DAMDASH_e, UPPER_MOVE2_e, m_HIO->mMove.m.field_0x48, 0.0f, -1,
++    setActAnimeUpper(dRes_INDEX_LKANM_BCK_DAMDASH_e, UPPER_MOVE2_e, getNormalRunAnimationRate(), 0.0f, -1,
+                      m_HIO->mBasic.m.field_0xC);
+     setPriTextureAnime(0x40, 0);
+     mFrameCtrlUpper[UPPER_MOVE2_e].setFrame(mFrameCtrlUnder[UNDER_MOVE1_e].getFrame());
+@@ -5753,6 +5776,13 @@ void daPy_lk_c::cancelNoDamageMode() {
+ 
+ /* 80112348-80112954       .text commonProcInit__9daPy_lk_cFQ29daPy_lk_c9daPy_PROC */
+ BOOL daPy_lk_c::commonProcInit(daPy_PROC proc) {
++#if TARGET_PC && defined(__PROSPERO__)
++    pc_gameplay_begin_action(PC_GAMEPLAY_FASTER_MOVEMENT);
++    pc_gameplay_begin_action(PC_GAMEPLAY_FASTER_TRAVERSAL);
++    if (mCurProc != daPyProc_PUSH_MOVE_e && mCurProc != daPyProc_PULL_MOVE_e &&
++        mCurProc != daPyProc_PUSH_PULL_WAIT_e)
++        pc_gameplay_begin_action(PC_GAMEPLAY_FASTER_BLOCK_PUSH);
++#endif
+     ProcInitTableEntry& procInit = mProcInitTable[proc];
+     
+     BOOL temp_r29;
+@@ -6110,6 +6140,24 @@ BOOL daPy_lk_c::procWait_init() {
+     return true;
+ }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++BOOL daPy_lk_c::ps5JumpAllowed() {
++    const bool ordinary = mCurProc == daPyProc_WAIT_e || mCurProc == daPyProc_FREE_WAIT_e ||
++        mCurProc == daPyProc_MOVE_e;
++    return ordinary && !checkNoControll() && !dComIfGp_event_runCheck() &&
++        !checkPlayerDemoMode() && mDemo.getDemoMode() == 0 && !dMenu_flag() && mAcch.ChkGroundHit() &&
++        !checkModeFlg(ModeFlg_MIDAIR | ModeFlg_DAMAGE | ModeFlg_WHIDE | ModeFlg_HANG |
++            ModeFlg_HOOKSHOT | ModeFlg_ROPE | ModeFlg_IN_SHIP | ModeFlg_CLIMB | ModeFlg_SWIM |
++            ModeFlg_GRAB | ModeFlg_PUSHPULL | ModeFlg_LADDER | ModeFlg_CROUCH | ModeFlg_CRAWL |
++            ModeFlg_CAUGHT | ModeFlg_SUBJECT | ModeFlg_PARRY) &&
++        !checkNoResetFlg0((daPy_FLG0)(daPyFlg0_HEAVY_STATE | daPyFlg0_EQUIP_HEAVY_BOOTS)) &&
++        !checkGrabWear() && mActorKeepGrab.getActor() == NULL &&
++        mpAttention && mpAttention->Owner() == this && mpAttention->mLockOnState == 0 &&
++        !mpAttention->chkFlag(AttnFlag_10000000 | AttnFlag_20000000) &&
++        m357C != 3 && m3580 != 3;
++}
++#endif
++
+ /* 80113044-801133FC       .text procWait__9daPy_lk_cFv */
+ BOOL daPy_lk_c::procWait() {
+     if (m36A0.abs2XZ() <= SQUARE(1.0f / 1000.0f) && m36AC.abs2XZ() >= SQUARE(5.0f)) {
+@@ -6835,6 +6883,17 @@ BOOL daPy_lk_c::procSlideBackLand() {
+ BOOL daPy_lk_c::procFrontRoll_init(f32 i_start) {
+     commonProcInit(daPyProc_FRONT_ROLL_e);
+     setSingleMoveAnime(ANM_ROLLF, m_HIO->mRoll.m.field_0x8, i_start, m_HIO->mRoll.m.field_0x0, m_HIO->mRoll.m.field_0x14);
++#if defined(__PROSPERO__)
++    f32 speedMultiplier = m_HIO->mRoll.m.field_0x18;
++    f32 baseSpeed = m_HIO->mRoll.m.field_0x1C;
++#if TARGET_PC && defined(__PROSPERO__)
++    const PcRollTuning roll = pc_gameplay_roll_tuning(speedMultiplier, baseSpeed,
++        pc_gameplay_enabled(PC_GAMEPLAY_FASTER_MOVEMENT));
++    speedMultiplier = roll.multiplier;
++    baseSpeed = roll.base;
++#endif
++    mNormalSpeed = speedF * speedMultiplier + baseSpeed;
++#else
+ #if TARGET_PC
+     // QoL "Voltereta más rápida" (pc_qol.h; wwrando increase_player_movement_speeds): the roll's speed
+     // is speedF * 6/17 + 20 (20 to 26) instead of speedF * 1.5 + 0.5 (0.5 to 26)
+@@ -6843,6 +6902,7 @@ BOOL daPy_lk_c::procFrontRoll_init(f32 i_start) {
+     mNormalSpeed = speedF * rollRate + rollBase;
+ #else
+     mNormalSpeed = speedF * m_HIO->mRoll.m.field_0x18 + m_HIO->mRoll.m.field_0x1C;
++#endif
+ #endif
+     if (checkHeavyStateOn()) {
+         mNormalSpeed *= m_HIO->mMove.m.field_0x80;
+@@ -6850,10 +6910,14 @@ BOOL daPy_lk_c::procFrontRoll_init(f32 i_start) {
+     if (mNormalSpeed < m_HIO->mRoll.m.field_0x20) {
+         mNormalSpeed = m_HIO->mRoll.m.field_0x20;
+     } else {
++#if defined(__PROSPERO__)
++        f32 maxSpeed = baseSpeed + getNormalRunSpeed() * speedMultiplier;
++#else
+ #if TARGET_PC
+         f32 maxSpeed = rollBase + m_HIO->mMove.m.field_0x18 * rollRate;
+ #else
+         f32 maxSpeed = m_HIO->mRoll.m.field_0x1C + m_HIO->mMove.m.field_0x18 * m_HIO->mRoll.m.field_0x18;
++#endif
+ #endif
+         if (checkHeavyStateOn()) {
+             maxSpeed *= m_HIO->mMove.m.field_0x80;
+@@ -7134,8 +7198,8 @@ BOOL daPy_lk_c::procAutoJump_init() {
+     m35F0 = m3688.y;
+     m35F4 = m3688.y;
+     setSingleMoveAnime(ANM_JMPST, m_HIO->mAutoJump.m.field_0x20, m_HIO->mAutoJump.m.field_0x2C, m_HIO->mAutoJump.m.field_0x2, m_HIO->mAutoJump.m.field_0x30);
+-    if (speedF > m_HIO->mMove.m.field_0x18) {
+-        speedF = m_HIO->mMove.m.field_0x18;
++    if (speedF > getNormalRunSpeed()) {
++        speedF = getNormalRunSpeed();
+     } else if (speedF < m_HIO->mAutoJump.m.field_0x14) {
+         speedF = m_HIO->mAutoJump.m.field_0x14;
+     }
+@@ -7161,11 +7225,11 @@ BOOL daPy_lk_c::procAutoJump() {
+         } else if (mStickDistance <= 0.05f) {
+             cLib_chaseF(&mNormalSpeed, 0.0f, (0.1f * m_HIO->mAutoJump.m.field_0x3C));
+         } else {
+-            cLib_chaseF(&mNormalSpeed, m_HIO->mMove.m.field_0x18,
++            cLib_chaseF(&mNormalSpeed, getNormalRunSpeed(),
+                         m_HIO->mAutoJump.m.field_0x1C);
+         }
+     } else {
+-        cLib_chaseF(&mNormalSpeed, m_HIO->mMove.m.field_0x18, m_HIO->mAutoJump.m.field_0x1C);
++        cLib_chaseF(&mNormalSpeed, getNormalRunSpeed(), m_HIO->mAutoJump.m.field_0x1C);
+     }
+     checkNextActionItemFly();
+     if (checkJumpFlower() || checkJumpRideShip()) {
+@@ -10816,8 +10880,8 @@ void daPy_lk_c::checkFallCode() {
+         f32 dVar5;
+         if (speedF < 1.5f) {
+             dVar5 = 1.5f;
+-        } else if (speedF > m_HIO->mMove.m.field_0x18) {
+-            dVar5 = m_HIO->mMove.m.field_0x18;
++        } else if (speedF > getNormalRunSpeed()) {
++            dVar5 = getNormalRunSpeed();
+         } else {
+             dVar5 = speedF;
+         }
+@@ -11218,7 +11282,12 @@ BOOL daPy_lk_c::execute() {
+         fopMsgM_demoMsgFlagOn();
+         if (checkEndMessage(0x14A3)) {
+             offNoResetFlg1(daPyFlg1_UNK200);
+-            dComIfGs_setEventReg(dSv_event_flag_c::UNK_9EFF, 0);
++#if TARGET_PC && defined(__PROSPERO__)
++            if (!pc_gameplay_enabled(PC_GAMEPLAY_KEEP_WATERED_TREES))
++#endif
++            {
++                dComIfGs_setEventReg(dSv_event_flag_c::UNK_9EFF, 0);
++            }
+             dComIfGp_event_reset();
+             mDemo.resetDemoType();
+         }
+@@ -11418,6 +11487,14 @@ BOOL daPy_lk_c::execute() {
+         onNoResetFlg0(daPyFlg0_UNK10000000);
+     }
+     
++#if TARGET_PC && defined(__PROSPERO__)
++    const PcMovementDecision extraMovement = pc_player_controls_take(
++        ps5JumpAllowed());
++    if (extraMovement.jump) {
++        // Use the original takeoff, collision, voice and landing procedures.
++        procAutoJump_init();
++    } else
++#endif
+     if (mCurProcFunc != NULL) {
+         (this->*mCurProcFunc)();
+     }
+@@ -12266,7 +12343,7 @@ void daPy_lk_c::playerInit() {
+     mAcch.OnLineCheck();
+     mAcch.ClrRoofNone();
+     mAcch.SetRoofCrrHeight(125.0f);
+-    mMaxNormalSpeed = m_HIO->mMove.m.field_0x18;
++    mMaxNormalSpeed = getNormalRunSpeed();
+     gravity = m_HIO->mAutoJump.m.field_0xC;
+     maxFallSpeed = m_HIO->mAutoJump.m.field_0x10;
+     mAcchCir[0].SetWall(30.1f, 35.0f);
+@@ -12639,7 +12716,7 @@ cPhs_State daPy_lk_c::makeBgWait() {
+                 speedF = mNormalSpeed;
+                 procSwimMove_init(0);
+             } else if (startMode == 1) {
+-                mNormalSpeed = m_HIO->mMove.m.field_0x2C * m_HIO->mMove.m.field_0x18;
++                mNormalSpeed = m_HIO->mMove.m.field_0x2C * getNormalRunSpeed();
+                 speedF = mNormalSpeed;
+                 procMove_init();
+             } else if (sceneMode == 2) {
+@@ -12652,8 +12729,8 @@ cPhs_State daPy_lk_c::makeBgWait() {
+                 m34E8 = shape_angle.y + 0x8000;
+                 procCrawlMove_init(0, 0);
+             } else {
+-                if (mNormalSpeed > m_HIO->mMove.m.field_0x18) {
+-                    mNormalSpeed = m_HIO->mMove.m.field_0x18;
++                if (mNormalSpeed > getNormalRunSpeed()) {
++                    mNormalSpeed = getNormalRunSpeed();
+                 }
+                 speedF = mNormalSpeed;
+                 procMove_init();
+diff --git a/game/src/d/actor/d_a_player_particle.inc b/game/src/d/actor/d_a_player_particle.inc
+index 2781a1a0..fae861f6 100644
+--- a/game/src/d/actor/d_a_player_particle.inc
++++ b/game/src/d/actor/d_a_player_particle.inc
+@@ -579,7 +579,7 @@ void daPy_lk_c::setAuraEffect() {
+                 var_f28 = 1.5f;
+             }
+         } else {
+-            var_f31 = std::fabsf(mNormalSpeed) / m_HIO->mMove.m.field_0x18;
++            var_f31 = std::fabsf(mNormalSpeed) / getNormalRunSpeed();
+             if (var_f31 > 1.0f) {
+                 var_f31 = 1.0f;
+             }
+diff --git a/game/src/d/actor/d_a_player_pushpull.inc b/game/src/d/actor/d_a_player_pushpull.inc
+index db7cff91..e44dd138 100644
+--- a/game/src/d/actor/d_a_player_pushpull.inc
++++ b/game/src/d/actor/d_a_player_pushpull.inc
+@@ -126,7 +126,9 @@ BOOL daPy_lk_c::procPushMove_init() {
+     }
+ 
+     commonProcInit(daPyProc_PUSH_MOVE_e);
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    setSingleMoveAnime(ANM_WALKPUSH, pc_gameplay_block_animation(m_HIO->mPushpull.m.field_0x8, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_BLOCK_PUSH)), 0.0f, -1, m_HIO->mPushpull.m.field_0xC);
++#elif TARGET_PC
+     // QoL "Empujar bloques más rápido" (pc_qol.h; wwrando increase_block_moving_animation): push
+     // animation 1.4 instead of 1.0. Not in dProcPushMove_init (the event push of doors), so
+     // Forsaken Fortress's door keeps its timing (wwrando needs fix_forsaken_fortress_door_softlock)
+@@ -177,7 +179,9 @@ BOOL daPy_lk_c::procPullMove_init() {
+     }
+ 
+     commonProcInit(daPyProc_PULL_MOVE_e);
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    setSingleMoveAnime(ANM_WALKPULL, pc_gameplay_block_animation(m_HIO->mPushpull.m.field_0x10, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_BLOCK_PUSH)), 0.0f, -1, m_HIO->mPushpull.m.field_0x14);
++#elif TARGET_PC
+     // QoL "Empujar bloques más rápido": pull animation 1.4 instead of 1.0
+     setSingleMoveAnime(ANM_WALKPULL, pc_qol(PC_QOL_FAST_BLOCKS) ? 1.4f : m_HIO->mPushpull.m.field_0x10, 0.0f, -1,
+                        m_HIO->mPushpull.m.field_0x14);
+diff --git a/game/src/d/actor/d_a_player_rope.inc b/game/src/d/actor/d_a_player_rope.inc
+index e5faae5a..334daa70 100644
+--- a/game/src/d/actor/d_a_player_rope.inc
++++ b/game/src/d/actor/d_a_player_rope.inc
+@@ -767,6 +767,15 @@ BOOL daPy_lk_c::procRopeSwing() {
+         }
+     }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    // Better Wind Waker / BlueWake: turn using the horizontal stick, with
++    // a quarter-stick dead zone and the original 512-angle-unit turn rate.
++    if (pc_gameplay_enabled(PC_GAMEPLAY_SWING_TURN)) {
++        shape_angle.y = pc_gameplay_swing_heading(shape_angle.y, CPad_GET_STICK_POS_X(0));
++        current.angle.y = shape_angle.y;
++    }
++#endif
++
+     f32 f30_3 = (f32)mProcVar2.m34D4 / r30;
+     if (changeRopeEndProc(0)) {
+         dVar13 = m35A0 / (100.0f * m_HIO->mItem.mRope.m.field_0x14);
+diff --git a/game/src/d/actor/d_a_player_tact.inc b/game/src/d/actor/d_a_player_tact.inc
+index 6959911b..981c263e 100644
+--- a/game/src/d/actor/d_a_player_tact.inc
++++ b/game/src/d/actor/d_a_player_tact.inc
+@@ -602,12 +602,20 @@ BOOL daPy_lk_c::procTactPlay() {
+         }
+ 
+         msg_class* msg_p = fopMsgM_SearchByID(mGameOverId);
++#if defined(__PROSPERO__)
++        if (msg_p == NULL || msg_p->mStatus == fopMsgStts_BOX_CLOSED_e
++#if TARGET_PC && defined(__PROSPERO__)
++            || pc_gameplay_enabled(PC_GAMEPLAY_NO_SONG_REPLAYS)
++#endif
++        ) {
++#else
+ #if TARGET_PC
+         // QoL "Canciones sin repetición" (pc_qol.h; BetterWW song_no_replay.asm): no wait for the
+         // "You conducted..." box to close
+         if (pc_qol(PC_QOL_NO_SONG_REPLAY) || msg_p == NULL || msg_p->mStatus == fopMsgStts_BOX_CLOSED_e) {
+ #else
+         if (msg_p == NULL || msg_p->mStatus == fopMsgStts_BOX_CLOSED_e) {
++#endif
+ #endif
+             fopAc_ac_c* tactZevPartner = NULL;
+             dComIfGp_setMetronomeOff();
+@@ -669,11 +677,19 @@ BOOL daPy_lk_c::procTactPlay() {
+                 m3624 = 0x14A9;
+             }
+         }
++#if defined(__PROSPERO__)
++    } else if (mFrameCtrlUnder[UNDER_MOVE0_e].getRate() < 0.01f
++#if TARGET_PC && defined(__PROSPERO__)
++               || pc_gameplay_enabled(PC_GAMEPLAY_NO_SONG_REPLAYS)
++#endif
++    ) {
++#else
+ #if TARGET_PC
+     // QoL "Canciones sin repetición" (song_no_replay.asm): no wait for the conducting animation to end
+     } else if (pc_qol(PC_QOL_NO_SONG_REPLAY) || mFrameCtrlUnder[UNDER_MOVE0_e].getRate() < 0.01f) {
+ #else
+     } else if (mFrameCtrlUnder[UNDER_MOVE0_e].getRate() < 0.01f) {
++#endif
+ #endif
+         seStartSystem(JA_SE_TAKT_MATCHED);
+         fopMsgM_messageSendOn();
+diff --git a/game/src/d/actor/d_a_player_whide.inc b/game/src/d/actor/d_a_player_whide.inc
+index 0b7219b5..7383ab81 100644
+--- a/game/src/d/actor/d_a_player_whide.inc
++++ b/game/src/d/actor/d_a_player_whide.inc
+@@ -37,7 +37,9 @@ void daPy_lk_c::setBlendWHideMoveAnime(f32 param_0) {
+     f32 fVar3;
+     daPy_ANM anm0;
+     if (!checkNoResetFlg0(daPyFlg0_UNK10000)) {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        anm_speed_0 = pc_gameplay_traversal_rate(m_HIO->mWall.m.field_0x14, PC_TRAVERSAL_SIDLE, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL));
++#elif TARGET_PC
+         // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): sidling along
+         // a wall at 2.0 instead of 1.6
+         anm_speed_0 = pc_qol(PC_QOL_FAST_CLIMB) ? 2.0f : m_HIO->mWall.m.field_0x14;
+diff --git a/game/src/d/actor/d_a_ship.cpp b/game/src/d/actor/d_a_ship.cpp
+index a90ba34e..95ee06e9 100644
+--- a/game/src/d/actor/d_a_ship.cpp
++++ b/game/src/d/actor/d_a_ship.cpp
+@@ -3,6 +3,9 @@
+  * King of Red Lions
+  */
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "d/dolzel_rel.h" // IWYU pragma: keep
+ #include "d/actor/d_a_ship.h"
+ #include "d/d_com_inf_game.h"
+@@ -1036,6 +1039,14 @@ BOOL daShip_c::checkOutRange() {
+             continue;
+         }
+         if (bVar5) {
++#if TARGET_PC && defined(__PROSPERO__)
++            if (pc_gameplay_skip_boat_path(bVar5, pathIndex,
++                    pc_gameplay_enabled(PC_GAMEPLAY_UNRESTRICTED_BOAT))) {
++                path = dPath_GetNextRoomPath(path, -1);
++                pathIndex++;
++                continue;
++            }
++#endif
+             if (
+ #if TARGET_PC
+                 // QoL "Barco sin restricciones" (pc_qol.h; BetterWW KORL_control.asm): the three
+@@ -1142,19 +1153,26 @@ BOOL daShip_c::checkOutRange() {
+ 
+ /* 00002CC4-00002CFC       .text decrementShipSpeed__8daShip_cFf */
+ void daShip_c::decrementShipSpeed(float decrementSpeed) {
++#if TARGET_PC && defined(__PROSPERO__)
++    const PcSailTuning sail = pc_gameplay_sail_tuning(pc_gameplay_sail_mode());
++    cLib_addCalc(&speedF, decrementSpeed, 0.05f, sail.acceleration, sail.accelerationStep);
++#else
+ #if TARGET_PC
+-    // QoL "Vela": steps of 0.2 / 0.03 instead of 0.1 / 0.015 (swift_sail.asm)
+     if (pc_qol_fast_sail()) {
+         cLib_addCalc(&speedF, decrementSpeed, 0.05f, 0.2f, 0.03f);
+         return;
+     }
+ #endif
+     cLib_addCalc(&speedF, decrementSpeed, 0.05f, 0.1f, 0.015f);
++#endif
+ }
+ 
+ /* 00002CFC-00002D5C       .text firstDecrementShipSpeed__8daShip_cFf */
+ void daShip_c::firstDecrementShipSpeed(float decrementSpeed) {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    const PcSailTuning sail = pc_gameplay_sail_tuning(pc_gameplay_sail_mode());
++    if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, sail.firstBrakeMax, sail.firstBrakeMin) < 3.0f) {
++#elif TARGET_PC
+     // QoL "Vela": steps of 10.0 / 2.0 instead of 5.0 / 1.0 (swift_sail.asm)
+     if (cLib_addCalc(&speedF, decrementSpeed, 0.1f, pc_qol_fast_sail() ? 10.0f : 5.0f,
+                      pc_qol_fast_sail() ? 2.0f : 1.0f) < 3.0f) {
+@@ -1180,7 +1198,9 @@ s16 daShip_c::getAimControllAngle(short referenceAngle) {
+ void daShip_c::setMoveAngle(short moveAngle) {
+     if (!checkForceMove()) {
+         s16 initialAngle = shape_angle.y;
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        f32 turnRate = pc_gameplay_sail_turn_rate(speedF, pc_gameplay_sail_mode());
++#elif TARGET_PC
+         // QoL "Vela" (daShip_qolSail)
+         f32 turnRate = 4.0f - std::fabsf(speedF) / daShip_qolSail(55.0f) * 3.0f;
+ #else
+@@ -1255,9 +1275,14 @@ void daShip_c::setCrashData(short param1) {
+         }
+         onStateFlg(daSFLG_UNK8000000_e);
+         if (m03B6 == 0) {
++#if TARGET_PC && defined(__PROSPERO__)
++            const float speedLimit = pc_gameplay_sail_tuning(pc_gameplay_sail_mode()).topSpeed;
++            if (speedF > speedLimit) speedF = speedLimit;
++#else
+             if (speedF > l_HIO.wind_inc_speed) {
+                 speedF = l_HIO.wind_inc_speed;
+             }
++#endif
+             speedF *= l_HIO.ef_speed_rate;
+             iVar5 = param1 - shape_angle.y;
+             fVar1 = cM_ssin(iVar5);
+@@ -1452,7 +1477,10 @@ void daShip_c::setSelfMove(int param_1) {
+             }
+             else {
+                 if (dComIfGp_getDoStatus() == dActStts_STOP_e && (CPad_CHECK_HOLD_A(0))) {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++                    const PcSailTuning sail = pc_gameplay_sail_tuning(pc_gameplay_sail_mode());
++                    fVar6 = cLib_addCalc(&speedF, 0.0f, 0.1f, sail.stopMax, sail.stopMin);
++#elif TARGET_PC
+                     // QoL "Vela": A stops the boat with steps of 2.0 / 0.2 (brisk 3.0 / 0.2) instead of
+                     // 1.0 / 0.1 (slow_down_ship_when_stopping)
+                     const int sail = pc_qol_fast_sail();
+@@ -1464,7 +1492,9 @@ void daShip_c::setSelfMove(int param_1) {
+ #endif
+                 }
+                 else {
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++                    fVar6 = CPad_GET_ANALOG_R(0) * pc_gameplay_sail_tuning(pc_gameplay_sail_mode()).cruiseSpeed;
++#elif TARGET_PC
+                     // QoL "Vela": R cruises at up to 30 instead of 10
+                     fVar6 = CPad_GET_ANALOG_R(0) * (pc_qol_fast_sail() ? 30.0f : 10.0f);
+ #else
+@@ -1503,7 +1533,10 @@ BOOL daShip_c::procWait_init() {
+ 
+ /* 00003AA0-00003B94       .text procWait__8daShip_cFv */
+ BOOL daShip_c::procWait() {  
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++    const PcSailTuning sail = pc_gameplay_sail_tuning(pc_gameplay_sail_mode());
++    cLib_addCalc(&speedF, 0.0f, 0.1f, sail.idleMax, sail.idleMin);
++#elif TARGET_PC
+     // QoL "Vela": without the player the boat stops with steps of 2.0 / 0.1 (brisk 4.0 / 0.2) instead
+     // of 1.0 / 0.05 (slow_down_ship_when_idle)
+     const int sail = pc_qol_fast_sail();
+@@ -1617,7 +1650,10 @@ BOOL daShip_c::procGetOff() {
+ }
+ 
+ /* 00003DEC-00003F00       .text procPaddleMove_init__8daShip_cFv */
+-BOOL daShip_c::procPaddleMove_init() {  
++BOOL daShip_c::procPaddleMove_init() {
++#if TARGET_PC && defined(__PROSPERO__)
++    pc_gameplay_begin_sailing();
++#endif
+     offStateFlg(daSFLG_UNK4_e);
+     
+     mCurMode = MODE_PADDLE_MOVE_e;
+@@ -1676,6 +1712,9 @@ BOOL daShip_c::procPaddleMove() {
+ 
+ /* 00004004-00004060       .text procSteerMove_init__8daShip_cFv */
+ BOOL daShip_c::procSteerMove_init() {
++#if TARGET_PC && defined(__PROSPERO__)
++    pc_gameplay_begin_sailing();
++#endif
+     offStateFlg(daSFLG_UNK4_e);
+     mCurMode = MODE_STEER_MOVE_e;
+     mProc = &daShip_c::procSteerMove;
+@@ -1716,7 +1755,10 @@ BOOL daShip_c::procSteerMove() {
+         if (windPower > 1.0f) {
+             windPower = 1.0f;
+         }
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        const PcSailTuning sail = pc_gameplay_sail_tuning(pc_gameplay_sail_mode());
++        windPower *= windFactor * sail.topSpeed;
++#elif TARGET_PC
+         // QoL "Vela" (daShip_qolSail)
+         windPower *= windFactor * daShip_qolSail(55.0f);
+ #else
+@@ -1725,15 +1767,13 @@ BOOL daShip_c::procSteerMove() {
+         
+         if (mpBodyAnm->checkFrame(7.0f)) {
+             float targetSpeed = windPower * 2.0f;
+-#if TARGET_PC
+-            // QoL "Vela" (daShip_qolSail)
+-            if (targetSpeed > daShip_qolSail(80.0f)) {
+-                targetSpeed = daShip_qolSail(80.0f);
++#if TARGET_PC && defined(__PROSPERO__)
++            if (targetSpeed > sail.initialSpeed) targetSpeed = sail.initialSpeed;
++#elif TARGET_PC
++            if (targetSpeed > daShip_qolSail(80.0f)) targetSpeed = daShip_qolSail(80.0f);
+ #else
+-            if (targetSpeed > 80.0f) {
+-                targetSpeed = 80.0f;
++            if (targetSpeed > 80.0f) targetSpeed = 80.0f;
+ #endif
+-            }
+             if (speedF < targetSpeed) {
+                 speedF = targetSpeed;
+                 if (checkForceMove()) {
+@@ -2876,6 +2916,9 @@ BOOL daShip_c::procStartModeWarp() {
+ 
+ /* 000074D4-00007684       .text procTactWarp_init__8daShip_cFv */
+ BOOL daShip_c::procTactWarp_init() {
++#if TARGET_PC && defined(__PROSPERO__)
++    pc_gameplay_begin_action(PC_GAMEPLAY_FASTER_BALLAD);
++#endif
+     GXColor diff;
+     GXColor amb[3];
+     
+@@ -2889,9 +2932,11 @@ BOOL daShip_c::procTactWarp_init() {
+     speed.y = 0.0f;
+     onStateFlg(daSFLG_FLY_e);
+     m037A = 0;
+-#if TARGET_PC
+-    // QoL "Balada del vendaval rápida" (pc_qol.h; BetterWW ballad.asm): no warp music, which would go
+-    // on playing after the early warp
++#if TARGET_PC && defined(__PROSPERO__)
++    if (!pc_gameplay_enabled(PC_GAMEPLAY_FASTER_BALLAD)) {
++        fopAcM_seStartCurrent(this, 0x186E, 0);
++    }
++#elif TARGET_PC
+     if (!pc_qol(PC_QOL_FAST_BALLAD)) {
+         fopAcM_seStartCurrent(this, 0x186E, 0);
+     }
+@@ -2955,12 +3000,20 @@ BOOL daShip_c::procTactWarp() {
+               cLib_chaseF(&current.pos.x, tornado->getJointXPos(iVar4), 50.0f);
+               cLib_chaseF(&current.pos.z, tornado->getJointZPos(iVar4), 50.0f);
+         }
++#if defined(__PROSPERO__)
++        if (m037A != 2 && (
++#if TARGET_PC && defined(__PROSPERO__)
++            pc_gameplay_enabled(PC_GAMEPLAY_FASTER_BALLAD) ||
++#endif
++            current.pos.y > m03F4 + 5000.0f)) {
++#else
+ #if TARGET_PC
+         // QoL "Balada del vendaval rápida" (pc_qol.h; BetterWW ballad.asm): the warp starts at once,
+         // without waiting for the boat to rise 5000 units into the cyclone
+         if (m037A != 2 && (pc_qol(PC_QOL_FAST_BALLAD) || current.pos.y > m03F4 + 5000.0f)) {
+ #else
+         if (m037A != 2 && current.pos.y > m03F4 + 5000.0f ) {
++#endif
+ #endif
+             m037A = 2;
+             dStage_changeScene(mTactWarpPosNum + 0xC5, 0.0f, 0, 0xFF);
+@@ -4278,6 +4331,13 @@ BOOL daShip_c::execute() {
+     else {
+         attention_info.position = current.pos;
+         if (!dComIfGp_checkPlayerStatus0(0, daPyStts0_SHIP_RIDE_e) && dComIfGs_isEventBit(dSv_event_flag_c::UNK_0908) && !checkStateFlg(daSFLG_UNK800000_e)) {
++#if defined(__PROSPERO__)
++            if (dComIfGs_isEventBit(dSv_event_flag_c::UNK_1980) || !dComIfGs_isEventBit(dSv_event_flag_c::UNK_0902)
++#if TARGET_PC && defined(__PROSPERO__)
++                || pc_gameplay_enabled(PC_GAMEPLAY_UNRESTRICTED_BOAT)
++#endif
++            ) {
++#else
+ #if TARGET_PC
+             // QoL "Barco sin restricciones" (KORL_control.asm, REL 0xB2D8): the boat offers "get in"
+             // whatever the wind, also between Dragon Roost's arrival (0x0902) and the first boarding
+@@ -4286,6 +4346,7 @@ BOOL daShip_c::execute() {
+                 dComIfGs_isEventBit(dSv_event_flag_c::UNK_1980) || !dComIfGs_isEventBit(dSv_event_flag_c::UNK_0902)) {
+ #else
+             if (dComIfGs_isEventBit(dSv_event_flag_c::UNK_1980) || !dComIfGs_isEventBit(dSv_event_flag_c::UNK_0902)) {
++#endif
+ #endif
+                 attention_info.flags = fopAc_Attn_ACTION_SHIP_e;
+             }
+@@ -4481,7 +4542,15 @@ BOOL daShip_c::execute() {
+     if (mPart == PART_STEER_e) {
+         dComIfGp_setPlayerStatus1(0, daPyStts1_SAIL_e);
+         mDoAud_setShipSailState(1);
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        // Preserve scripted wind, and leave wind alone while not actively sailing.
++        if (pc_gameplay_sail_mode() != PC_SAIL_ORIGINAL &&
++            checkStateFlg(daSFLG_SAIL_ON_e) && !checkStateFlg(daSFLG_FLY_e) &&
++            dComIfGp_checkPlayerStatus0(0, daPyStts0_SHIP_RIDE_e) &&
++            !dComIfGp_event_runCheck() && !daPy_getPlayerLinkActorClass()->checkNoControll()) {
++            dKyw_tact_wind_set(0, pc_gameplay_sail_wind(shape_angle.y));
++        }
++#elif TARGET_PC
+         // QoL "Vela" (set_wind_dir_to_ship_dir): while sailing, the wind blows the way the boat
+         // faces, rounded to 45 degrees, as the Wind's Requiem sets it; every value of the row
+         // (swift, brisk, and wind: BetterWW normal_sail_wind.asm, the same call without the speeds)
+diff --git a/game/src/d/d_camera.cpp b/game/src/d/d_camera.cpp
+index 1163dccb..fe4775dd 100644
+--- a/game/src/d/d_camera.cpp
++++ b/game/src/d/d_camera.cpp
+@@ -4,6 +4,10 @@
+ //
+ 
+ #include "d/dolzel.h" // IWYU pragma: keep
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#include "pc/pc_camera_controls.h"
++#endif
+ #if TARGET_PC
+ #include "pc/pc_aspect.h"
+ #include "pc/pc_harness.h"
+@@ -48,7 +52,12 @@
+ // and the figure viewer read the C stick themselves and keep its real directions. Every
+ // CPad_GET_SUBSTICK_POS_X/Y below this point reads through these.
+ static inline f32 dCamera_cStickX(int padId) {
++#if defined(__PROSPERO__)
++    // Native orbit yaw is opposite to subject-view yaw.
++    if (!pc_camera_invert_x()) {
++#else
+     if (pc_camera_invert_x()) {
++#endif
+         return -CPad_GET_SUBSTICK_POS_X(padId);
+     }
+     return CPad_GET_SUBSTICK_POS_X(padId);
+@@ -75,8 +84,21 @@ static bool dCamera_aimLatch[4];
+ static inline f32 dCamera_aimClamp(f32 v) {
+     return v > 1.0f ? 1.0f : v < -1.0f ? -1.0f : v;
+ }
+-
++// PS5 separates subject-view aiming from movement and item zoom.
+ static void dCamera_aimStick(int padId, bool zoom, f32* x, f32* y) {
++#if defined(__PROSPERO__)
++    *x = 0.0f;
++    *y = 0.0f;
++    if (!dCamera_aimLatch[padId & 3]) {
++        dCamera_aimLatch[padId & 3] = CPad_GET_SUBSTICK_VALUE(padId) < 0.1f;
++    } else {
++        *x = CPad_GET_SUBSTICK_POS_X(padId);
++        *y = CPad_GET_SUBSTICK_POS_Y(padId);
++        if (pc_camera_invert_x()) *x = -*x;
++        // Positive native subject pitch points down; stick-up should look up.
++        if (!pc_camera_invert_y()) *y = -*y;
++    }
++#else
+     if (pc_aim_right_stick()) {
+         const f32 cx = CPad_GET_SUBSTICK_POS_X(padId);
+         const f32 cy = zoom ? 0.0f : CPad_GET_SUBSTICK_POS_Y(padId);
+@@ -90,6 +112,7 @@ static void dCamera_aimStick(int padId, bool zoom, f32* x, f32* y) {
+     if (pc_aim_invert_y()) {
+         *y = -*y;
+     }
++#endif
+ }
+ 
+ // Issue #25: the gyroscope's turn since the last frame (pc_controls.h), in the view's own units:
+@@ -776,6 +799,9 @@ void dCamera_c::updatePad() {
+     mStickCPosXLast = fVar1;
+     mStickCPosYLast = fVar2;
+     mStickCValueLast = fVar3;
++#if TARGET_PC && defined(__PROSPERO__)
++    ps5CameraPad();
++#endif
+ 
+     fVar1 = CPad_GET_ANALOG_L(mPadId);
+     mTriggerLeftDelta = mTriggerLeftLast - fVar1;
+@@ -1312,7 +1338,14 @@ int dCamera_c::nextMode(s32 i_curMode) {
+                     m144 = 1;
+                     m184 = 0;
+                 }
+-                else if (dCamera_cStickYCmd(mStickCPosYLast) <= 0.0f && mStickCValueLast > mCamSetup.CStickReleaseThreshold()) {
++                else if (
++#if TARGET_PC && defined(__PROSPERO__)
++                    // Any direction enters orbit. An R3 click takes priority this frame.
++                    !pc_camera_controls_input().pressed &&
++#else
++                    dCamera_cStickYCmd(mStickCPosYLast) <= 0.0f &&
++#endif
++                    mStickCValueLast > mCamSetup.CStickReleaseThreshold()) {
+                     m144 = 0;
+                 }
+                 else if (i_curMode == 0 || i_curMode == 0x13) {
+@@ -1333,12 +1366,15 @@ int dCamera_c::nextMode(s32 i_curMode) {
+                                 m184 = 0;
+                             }
+                         }
++                        // PS5 uses R3 to enter first person; tilting the stick only moves the camera.
++#if !defined(__PROSPERO__)
+                         else if (dCamera_cStickYCmd(mStickCPosYLast) > mCamSetup.mCstick.SwTHH()) {
+                             // C-stick up.
+                             setComStat(dCamAttnStts_00001000_e);
+                             m184 = 1;
+                             setComStat(dCamAttnStts_00000400_e);
+                         }
++#endif
+                         else {
+                             setComStat(dCamAttnStts_00000400_e);
+                         }
+@@ -4061,7 +4097,9 @@ bool dCamera_c::talktoCamera(s32 param_1) {
+         talk->m378 = 'TALK';
+         talk->m3BC = 0;
+         talk->m3B0 = -1;
+-#if TARGET_PC
++#if TARGET_PC && defined(__PROSPERO__)
++        talk->m3C0 = pc_gameplay_talk_zoom_frames(20, pc_gameplay_enabled(PC_GAMEPLAY_FASTER_TRAVERSAL));
++#elif TARGET_PC
+         // QoL "Gatear y trepar más rápido" (pc_qol.h; wwrando increase_misc_animations): the talk
+         // camera gets to its place in 10 frames instead of 20
+         talk->m3C0 = pc_qol(PC_QOL_FAST_CLIMB) ? 10 : 20;
+@@ -4839,6 +4877,7 @@ bool dCamera_c::CalcSubjectAngle(s16* param_1, s16* param_2) {
+ #endif
+     *param_2 = local_a8;
+     *param_1 = local_94.Val();
++
+     mWork.subject.m37D = 0;
+     return bVar9;
+ }
+@@ -5134,13 +5173,20 @@ bool dCamera_c::subjectCamera(s32 param_1) {
+         // zoom control block
+         f32 a = 0.0f;
+         f32 b = 0.0f;
+-        if (dCamera_cStickYCmd(mStickCPosYLast) > 0.0f) {
+-            a = dCamMath::rationalBezierRatio(dCamera_cStickYCmd(mStickCPosYLast), mCamSetup.CurveWeight());
++#if TARGET_PC && defined(__PROSPERO__)
++        // Telescope/Picto Box zoom is separate from right-stick aiming and inversion.
++        const f32 zoomStick = mStickMainPosYLast;
++#else
++        const f32 zoomStick = dCamera_cStickYCmd(mStickCPosYLast);
++#endif
++        if (zoomStick > 0.0f) {
++            a = dCamMath::rationalBezierRatio(zoomStick, mCamSetup.CurveWeight());
+         } else {
+-            b = dCamMath::rationalBezierRatio(-dCamera_cStickYCmd(mStickCPosYLast), mCamSetup.CurveWeight());
++            b = dCamMath::rationalBezierRatio(-zoomStick, mCamSetup.CurveWeight());
+         }
+ 
+         f32 next = mWork.subject.m38C + p26 * (a - b) * 0.1f;
++
+         if (next < 0.0f) {
+             mWork.subject.m38C = 0.0f;
+         }
+diff --git a/game/src/d/d_map.cpp b/game/src/d/d_map.cpp
+index 0650763c..e7a1f67b 100644
+--- a/game/src/d/d_map.cpp
++++ b/game/src/d/d_map.cpp
+@@ -1,9 +1,15 @@
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_ui_assets.h"
++#endif
+ //
+ // Generated by dtk
+ // Translation Unit: d_map.cpp
+ //
+ 
+ #include "d/dolzel.h" // IWYU pragma: keep
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #if TARGET_PC
+ #include "pc/pc_aspect.h"
+ #endif
+@@ -28,8 +34,13 @@
+ #if TARGET_PC
+ #include "pc/pc_qol.h"
+ #endif
+-
+-
++#if TARGET_PC && defined(__PROSPERO__)
++// The camera/Free artwork is already shaded grey. Use a neutral silver tint
++// alongside the PS5 prompts, retaining the native outline and localized label.
++static const GXColor kCameraFreeColor = {210, 214, 220, 255};
++#else
++static const GXColor kCameraFreeColor = {255, 210, 0, 255};
++#endif
+ enum {
+     Floor_B5F = 123,
+     Floor_B4F = 124,
+@@ -1369,6 +1380,17 @@ void dMap_c::create() {
+         mFrameTexture[i].setScroll(cord[i][0], cord[i][1], cord[i][2], cord[i][3]);
+         mFrameTex[i].init(1, &mFrameTexture[i]);
+     }
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++    char buf[20];
++    sprintf(buf, "camera_free_%d.bti", dComIfGs_getPalLanguage());
++    JKRReadTypeResource(dMap_img, 0xC00, 'TIMG', buf, dComIfGp_getActionIconArchive());
++    timg = (ResTIMG*)dMap_img;
++}
++else {
++    timg = static_cast<ResTIMG*>(dComIfG_getObjectRes("Always", dRes_INDEX_ALWAYS_BTI_CAMERA_FREE_e));
++}
++#else
+ #if VERSION == VERSION_PAL
+     char buf[20];
+     sprintf(buf, "camera_free_%d.bti", dComIfGs_getPalLanguage());
+@@ -1376,13 +1398,20 @@ void dMap_c::create() {
+     timg = (ResTIMG*)dMap_img;
+ #else
+     timg = static_cast<ResTIMG*>(dComIfG_getObjectRes("Always", dRes_INDEX_ALWAYS_BTI_CAMERA_FREE_e));
++#endif
+ #endif
+     JUT_ASSERT(VERSION_SELECT(3631, 3460, 3476, 3476), timg != NULL);
+-    mIconFreeTexture.init(timg, 10, (GXColor){255, 210, 0, 255});
++    mIconFreeTexture.init(timg, 10, kCameraFreeColor);
+     mIconFreeTexture.field_0x0 = 1;
+     mIconFreeTexture.setScroll(0.0f, 0.0f, 1.0f, 1.0f);
+     mIconFreeTex.init(1, &mIconFreeTexture);
+     timg = static_cast<ResTIMG*>(dComIfG_getObjectRes("Always", dRes_INDEX_ALWAYS_BTI_CAMERA_SELF_e));
++#if TARGET_PC && defined(__PROSPERO__)
++    if (dRes_info_c* info = dComIfG_getObjectResInfo("Always")) {
++        const u32 size = info->getArchive()->getExpandedResSize(timg);
++        if (void* prompt = pc_ui_assets_camera_prompt(timg, size)) timg = static_cast<ResTIMG*>(prompt);
++    }
++#endif
+     JUT_ASSERT(VERSION_SELECT(3644, 3473, 3489, 3489), timg != NULL);
+     mIconSelfTexture.init(timg, 10, (GXColor){255, 222, 255, 255});
+     mIconSelfTexture.field_0x0 = 1;
+@@ -1567,10 +1596,15 @@ void dMap_2DSQ_c::draw() {
+ /* 80048A20-80048B54       .text mapDrawIconFree__6dMap_cFssUc */
+ void dMap_c::mapDrawIconFree(s16 param_1, s16 param_2, u8 param_3) {
+     if (param_3) {
+-        mIconFreeTex.setPos(param_1 - mIconFreeScale * 64.0f, param_2 - mIconFreeScale * 16.0f, param_1 + mIconFreeScale * 64.0f, param_2 + mIconFreeScale * 16.0f);
+-        mIconFreeTexture.mColor.r = 255;
+-        mIconFreeTexture.mColor.g = 210;
+-        mIconFreeTexture.mColor.b = 0;
++#if TARGET_PC && defined(__PROSPERO__)
++        // Keep the camera prompt clear of the action button, including ISO/HD button art.
++        // Offset its own quad in texture units so the gap follows the prompt's animation scale.
++        const f32 cameraX = param_1 + (pc_ui_assets_active() ? 24.0f * mIconFreeScale : 0.0f);
++#else
++        const f32 cameraX = param_1;
++#endif
++        mIconFreeTex.setPos(cameraX - mIconFreeScale * 64.0f, param_2 - mIconFreeScale * 16.0f, cameraX + mIconFreeScale * 64.0f, param_2 + mIconFreeScale * 16.0f);
++        mIconFreeTexture.mColor = kCameraFreeColor;
+         mIconFreeTexture.mColor.a = param_3;
+         dComIfGd_set2DOpa(&mIconFreeTex);
+     }
+@@ -1579,7 +1613,14 @@ void dMap_c::mapDrawIconFree(s16 param_1, s16 param_2, u8 param_3) {
+ /* 80048B54-80048C80       .text mapDrawIconSelf__6dMap_cFssUc */
+ void dMap_c::mapDrawIconSelf(s16 param_1, s16 param_2, u8 param_3) {
+     if (param_3) {
+-        mIconSelfTex.setPos(param_1 - mIconFreeScale * 64.0f, param_2 - mIconFreeScale * 16.0f, param_1 + mIconFreeScale * 64.0f, param_2 + mIconFreeScale * 16.0f);
++#if TARGET_PC && defined(__PROSPERO__)
++        // Keep the camera prompt clear of the action button, including ISO/HD button art.
++        // Offset its own quad in texture units so the gap follows the prompt's animation scale.
++        const f32 cameraX = param_1 + (pc_ui_assets_active() ? 24.0f * mIconFreeScale : 0.0f);
++#else
++        const f32 cameraX = param_1;
++#endif
++        mIconSelfTex.setPos(cameraX - mIconFreeScale * 64.0f, param_2 - mIconFreeScale * 16.0f, cameraX + mIconFreeScale * 64.0f, param_2 + mIconFreeScale * 16.0f);
+         mIconSelfTexture.mColor.r = 255;
+         mIconSelfTexture.mColor.g = 255;
+         mIconSelfTexture.mColor.b = 255;
+@@ -3166,7 +3207,11 @@ void dMap_c::drawPointGc(u8 kind, f32 posX, f32 posY, f32 posZ, s8 roomNo, s16 a
+                 }
+                 break;
+             case MAP_POINT_TBOX:
+-                if (param_7 != 0xF && param_7 != 0x10) {
++                if ((
++#if TARGET_PC && defined(__PROSPERO__)
++                    pc_gameplay_enabled(PC_GAMEPLAY_TINGLE_CHESTS) ||
++#endif
++                    (param_7 != 0xF && param_7 != 0x10))) {
+                     if (getKindMapType() == MAP_KIND_DUNGEON) {
+                         if (dComIfGs_isDungeonItemCompass()) {
+                             if (mMapDispMode == MAP_DISP_FULL) {
+@@ -3319,12 +3364,20 @@ void dMap_c::drawPointGc(u8 kind, f32 posX, f32 posY, f32 posZ, s8 roomNo, s16 a
+                 }
+                 break;
+             case MAP_POINT_TBOX:
++#if defined(__PROSPERO__)
++                if ((
++#if TARGET_PC && defined(__PROSPERO__)
++                    pc_gameplay_enabled(PC_GAMEPLAY_TINGLE_CHESTS) ||
++#endif
++                    (param_7 != 0xF && param_7 != 0x10))) {
++#else
+ #if TARGET_PC
+                 // QoL "Cofres de Tingle sin Tingle Tuner" (pc_qol.h; BetterWW tingle_chests_without_tuner.asm):
+                 // Tingle chests (opened flag 0xF or 0x10) show on the minimap with the compass too
+                 if (pc_qol(PC_QOL_TINGLE_CHESTS) || (param_7 != 0xF && param_7 != 0x10)) {
+ #else
+                 if (param_7 != 0xF && param_7 != 0x10) {
++#endif
+ #endif
+                     if (getKindMapType() == MAP_KIND_DUNGEON) {
+                         if (dComIfGs_isDungeonItemCompass()) {
+@@ -3798,6 +3851,14 @@ void dMap_2DMtMapSpcl_c::draw() {
+         GXSetTexCoordGen(GXTexCoordID(r28), GX_TG_MTX2x4, GXTexGenSrc(GX_TG_TEX0 + r28), GX_IDENTITY);
+         GXSetTevOrder(GXTevStageID(r28), GXTexCoordID(r28), GXTexMapID(r28), GX_COLOR_NULL);
+         GXSetTevColorIn(GXTevStageID(r28), GX_CC_ZERO, GXTevColorArg(GX_CC_C0 + r28 * 2), GX_CC_TEXC, r28 ? GX_CC_CPREV : GX_CC_ZERO);
++#if TARGET_PC && defined(__PROSPERO__)
++        if (r27 == &dMap_c::mIconFreeTexture) {
++            // Lift black outlines to charcoal while retaining the localized disc artwork.
++            // The single camera layer leaves register 1 free; alpha/fades stay unchanged.
++            GXSetTevColor(GX_TEVREG1, (GXColor){64, 64, 64, 255});
++            GXSetTevColorIn(GXTevStageID(r28), GX_CC_C1, GX_CC_C0, GX_CC_TEXC, GX_CC_ZERO);
++        }
++#endif
+         GXSetTevColorOp(GXTevStageID(r28), GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+         GXSetTevAlphaIn(GXTevStageID(r28), GX_CA_ZERO, GXTevAlphaArg(GX_CA_A0 + r28), GX_CA_TEXA, r28 ? GX_CA_APREV : GX_CA_ZERO);
+         GXSetTevAlphaOp(GXTevStageID(r28), GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
+diff --git a/game/src/d/d_menu_dmap.cpp b/game/src/d/d_menu_dmap.cpp
+index 4f7abdec..c5411c4b 100644
+--- a/game/src/d/d_menu_dmap.cpp
++++ b/game/src/d/d_menu_dmap.cpp
+@@ -4,6 +4,9 @@
+ //
+ 
+ #include "d/dolzel.h" // IWYU pragma: keep
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #if TARGET_PC
+ #include "pc/pc_aspect.h"
+ #endif
+@@ -570,12 +573,20 @@ void dMenu_Dmap_c::treasureSet() {
+             for (int i = 0; i < tinfo->num; tentry++, i++) {
+                 int tboxNo = (tentry->base.parameters >> 7) & 0x1F;
+                 if (mCurFloor == dMap_GetFloorNo(&dComIfGp_getStage(), tentry->base.position.y)) {
++#if defined(__PROSPERO__)
++                    if (!dComIfGs_isTbox(tboxNo) && (
++#if TARGET_PC && defined(__PROSPERO__)
++                    pc_gameplay_enabled(PC_GAMEPLAY_TINGLE_CHESTS) ||
++#endif
++                    (tboxNo != 0xF && tboxNo != 0x10))) {
++#else
+ #if TARGET_PC
+                     // QoL "Cofres de Tingle sin Tingle Tuner" (pc_qol.h; BetterWW tingle_chests_without_tuner.asm):
+                     // the current floor's Tingle chests (opened flag 0xF or 0x10) show with the compass too
+                     if (!dComIfGs_isTbox(tboxNo) && (pc_qol(PC_QOL_TINGLE_CHESTS) || (tboxNo != 0xF && tboxNo != 0x10))) {
+ #else
+                     if (!dComIfGs_isTbox(tboxNo) && tboxNo != 0xF && tboxNo != 0x10) {
++#endif
+ #endif
+                         treasure_p[no].exists = 1;
+                         treasure_p[no].ppane->setWhite(g_mdHIO.mTreasureWhite);
+@@ -589,7 +600,11 @@ void dMenu_Dmap_c::treasureSet() {
+                     }
+                 }
+                 if (!mCurFloorOnly && mCurFloor - 1 == dMap_GetFloorNo(&dComIfGp_getStage(), tentry->base.position.y)) {
+-                    if (!dComIfGs_isTbox(tboxNo) && tboxNo != 0xF && tboxNo != 0x10) {
++                    if (!dComIfGs_isTbox(tboxNo) && (
++#if TARGET_PC && defined(__PROSPERO__)
++                    pc_gameplay_enabled(PC_GAMEPLAY_TINGLE_CHESTS) ||
++#endif
++                    (tboxNo != 0xF && tboxNo != 0x10))) {
+                         treasure_p[no].exists = 1;
+                         treasure_p[no].ppane->setWhite(g_mdHIO.mTreasureWhite);
+                         treasure_p[no].ppane->setBlack(g_mdHIO.mTreasureBlack);
+@@ -603,7 +618,11 @@ void dMenu_Dmap_c::treasureSet() {
+                     }
+                 }
+                 if (!mCurFloorOnly && mCurFloor + 1 == dMap_GetFloorNo(&dComIfGp_getStage(), tentry->base.position.y)) {
+-                    if (!dComIfGs_isTbox(tboxNo) && tboxNo != 0xF && tboxNo != 0x10) {
++                    if (!dComIfGs_isTbox(tboxNo) && (
++#if TARGET_PC && defined(__PROSPERO__)
++                    pc_gameplay_enabled(PC_GAMEPLAY_TINGLE_CHESTS) ||
++#endif
++                    (tboxNo != 0xF && tboxNo != 0x10))) {
+                         treasure_p[no].exists = 1;
+                         treasure_p[no].ppane->setWhite(g_mdHIO.mTreasureWhite);
+                         treasure_p[no].ppane->setBlack(g_mdHIO.mTreasureBlack);
+diff --git a/game/src/d/d_ovlp_fade.cpp b/game/src/d/d_ovlp_fade.cpp
+index 1632e08f..e214c13f 100644
+--- a/game/src/d/d_ovlp_fade.cpp
++++ b/game/src/d/d_ovlp_fade.cpp
+@@ -5,6 +5,20 @@
+ 
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #include "d/d_ovlp_fade.h"
++#if TARGET_PC
++#include "pc/pc_gameplay_options.h"
++#if defined(__PROSPERO__)
++#include "pc/pc_quick_doors.h"
++#endif
++#endif
++
++static int ordinaryFadeFrames() {
++#if TARGET_PC
++    return pc_gameplay_fade_frames(pc_gameplay_enabled(PC_GAMEPLAY_SHORT_FADES));
++#else
++    return 26;
++#endif
++}
+ #include "f_op/f_op_overlap.h"
+ #include "f_op/f_op_overlap_mng.h"
+ #include "f_pc/f_pc_manager.h"
+@@ -21,14 +35,25 @@ static BOOL dOvlpFd_Draw(overlap1_class* i_this) {
+ BOOL dOvlpFd_FadeOut(overlap1_class* i_this) {
+     if (i_this->mFadeOutTime == 0) {
+         if (fpcM_GetProfName(i_this) != fpcNm_OVERLAP6_e) {
+-            if (!JFWDisplay::getManager()->getFader()->startFadeIn(26))
++            const int frames = ordinaryFadeFrames();
++            if (!JFWDisplay::getManager()->getFader()->startFadeIn(frames))
+                 return TRUE;
+-            i_this->mFadeOutTime = 26;
++            i_this->mFadeOutTime = frames;
+         } else {
+             if (!JFWDisplay::getManager()->getFader()->startFadeIn(0))
+                 return TRUE;
+             i_this->mFadeOutTime = 1;
+         }
++#if TARGET_PC && defined(__PROSPERO__)
++        // Allow the ordinary arrival camera two covered frames to settle.
++        if (pc_quick_doors_take_arrival()) {
++            JUTFader* fader = JFWDisplay::getManager()->getFader();
++            fader->mStatus = JUTFader::WaitOut;
++            fader->mTimer = 0;
++            fader->mDelayStatus = JUTFader::FadeIn;
++            fader->mDelayTimer = 2;
++        }
++#endif
+     }
+ 
+ #if VERSION > VERSION_DEMO
+@@ -58,12 +83,18 @@ BOOL dOvlpFd_Wait(overlap1_class* i_this) {
+ /* 802236E4-802237A4       .text dOvlpFd_FadeIn__FP14overlap1_class */
+ BOOL dOvlpFd_FadeIn(overlap1_class* i_this) {
+     if (i_this->mFadeInTime == 0) {
+-        i_this->mFadeInTime = 26;
++        i_this->mFadeInTime = ordinaryFadeFrames();
+         if (fpcM_GetProfName(i_this) == fpcNm_OVERLAP0_e || fpcM_GetProfName(i_this) == fpcNm_OVERLAP7_e) {
+-            mDoGph_gInf_c::startFadeOut(26);
++            mDoGph_gInf_c::startFadeOut(i_this->mFadeInTime);
+         }
+     }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    // A knob door already covers the picture: no need to count another fade.
++    if (i_this->mFadeInTime > 1 &&
++        JFWDisplay::getManager()->getFader()->getStatus() == JUTFader::WaitIn &&
++        pc_quick_doors_cut_wait()) i_this->mFadeInTime = 1;
++#endif
+     if (--i_this->mFadeInTime == 0) {
+         dOvlpFd_execute_f = dOvlpFd_Wait;
+         mDoGph_gInf_c::startFadeOut(0);
+@@ -93,6 +124,9 @@ static BOOL dOvlpFd_Delete(overlap1_class* i_this) {
+ /* 802237E0-802237F4       .text dOvlpFd_Create__FPv */
+ static cPhs_State dOvlpFd_Create(void* i_this) {
+     dOvlpFd_execute_f = dOvlpFd_FadeIn;
++#if TARGET_PC && defined(__PROSPERO__)
++    pc_quick_doors_clear_arrival();
++#endif
+ #if VERSION == VERSION_DEMO
+     return cPhs_NEXT_e;
+ #else
+diff --git a/game/src/d/d_s_open.cpp b/game/src/d/d_s_open.cpp
+index ab080756..e68734b1 100644
+--- a/game/src/d/d_s_open.cpp
++++ b/game/src/d/d_s_open.cpp
+@@ -4,6 +4,9 @@
+ //
+ 
+ #include "d/dolzel.h" // IWYU pragma: keep
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "d/d_s_open.h"
+ #include "f_op/f_op_scene.h"
+ #include "f_op/f_op_draw_iter.h"
+@@ -23,6 +26,9 @@ cPhs_State dScnOpen_c::create() {
+ 
+     cPhs_State rt = dComIfG_resLoad(&mPhs, "Opening");
+     if (rt == cPhs_COMPLEATE_e) {
++#if TARGET_PC && defined(__PROSPERO__)
++        pc_gameplay_begin_action(PC_GAMEPLAY_SKIP_INTRO);
++#endif
+         solid_heap = mDoExt_createSolidHeapFromGameToCurrent(0x20000, 0);
+         JUT_ASSERT(DEMO_SELECT(56, 59), solid_heap != NULL);
+         mpProc = new dScnOpen_proc_c();
+@@ -68,6 +74,13 @@ BOOL dScnOpen_c::execute() {
+ #endif
+     }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    // Use the existing transition path, including its overlap guard and audio setup.
++    if (pc_gameplay_enabled(PC_GAMEPLAY_SKIP_INTRO)) {
++        changeGameScene();
++        return TRUE;
++    }
++#endif
+     mpProc->proc_execute();
+     if (mpProc->isEnd())
+         changeGameScene();
+diff --git a/game/src/d/d_save.cpp b/game/src/d/d_save.cpp
+index 1bae9c02..8fc596d0 100644
+--- a/game/src/d/d_save.cpp
++++ b/game/src/d/d_save.cpp
+@@ -3,6 +3,9 @@
+ // Translation Unit: d_save.cpp
+ //
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_gameplay_options.h"
++#endif
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #include "d/d_save.h"
+ #include "d/d_save_init.h"
+@@ -833,7 +836,12 @@ void dSv_player_map_c::init() {
+     }
+ 
+     for (int i = 0; i < ARRAY_SIZE(mFmapBits); i++) {
++#if TARGET_PC && defined(__PROSPERO__)
++        // This is new-save initialization, not a rewrite of loaded save data.
++        mFmapBits[i] = pc_gameplay_enabled(PC_GAMEPLAY_REVEAL_SEA_CHART) ? 1 : 0;
++#else
+         mFmapBits[i] = 0;
++#endif
+     }
+ 
+ #if VERSION > VERSION_DEMO
+@@ -991,7 +999,7 @@ void dSv_player_info_c::init() {
+ 
+ /* 8005BF2C-8005BFA4       .text init__19dSv_player_config_cFv */
+ void dSv_player_config_c::init() {
+-    mRuby = VERSION_SELECT(0, 0, 1, 0);
++    mRuby = REGION_SELECT(1, 0);
+ 
+     u32 soundMode = OSGetSoundMode();
+     if (soundMode == 0) {
+diff --git a/game/src/d/d_stage.cpp b/game/src/d/d_stage.cpp
+index 06164b00..0006127c 100644
+--- a/game/src/d/d_stage.cpp
++++ b/game/src/d/d_stage.cpp
+@@ -23,6 +23,9 @@
+ #include "d/actor/d_a_sea.h"
+ #if TARGET_PC
+ #include "pc/pc_harness.h"
++#if defined(__PROSPERO__)
++#include "pc/pc_quick_doors.h"
++#endif
+ #endif
+ 
+ /* 80040900-80040938       .text set__18dStage_nextStage_cFPCcScsScSc */
+@@ -1490,6 +1493,10 @@ int dStage_playerInit(dStage_dt_c* i_stage, void* i_data, int num, void* i_file)
+ 
+     dComIfGp_setShipId((appen->base.angle.z >> 8) & 0xFF);
+     dComIfGp_setShipRoomId(appen->base.parameters & 0x3F);
++#if TARGET_PC && defined(__PROSPERO__)
++    pc_quick_doors_arrive(player_data->name, point, appen->base.parameters,
++        appen->base.angle.y, appen->base.position.x, appen->base.position.z);
++#endif
+     dStage_actorCreate(player_data, appen);
+ 
+     scene_class* stageProc = fopScnM_SearchByID(dStage_roomControl_c::getProcID());
+diff --git a/game/src/f_op/f_op_scene_req.cpp b/game/src/f_op/f_op_scene_req.cpp
+index 08b0cee0..0febd75a 100644
+--- a/game/src/f_op/f_op_scene_req.cpp
++++ b/game/src/f_op/f_op_scene_req.cpp
+@@ -35,7 +35,46 @@ static cPhs_State fopScnRq_phase_Done(scene_request_class* i_sceneReq) {
+     return cPhs_NEXT_e;
+ }
+ 
++#if TARGET_PC
++#include "f_pc/f_pc_base.h"
++#include "f_pc/f_pc_delete_tag.h"
++#include <cstdio>
++// A scene request that stays in one step: every 300 calls, which step and what the delete queue holds.
++static void pc_fopScnRq_watch(scene_request_class* i_sceneReq) {
++    static scene_request_class* sReq;
++    static int sScene = -2, sNode = -2;
++    static unsigned sCalls;
++    const int scene = i_sceneReq->mReqPhsProcCls.id, node = i_sceneReq->mCrtReq.mReqPhsProc.id;
++    if (i_sceneReq != sReq || scene != sScene || node != sNode) {
++        sReq = i_sceneReq;
++        sScene = scene;
++        sNode = node;
++        sCalls = 0;
++        return;
++    }
++    if (++sCalls % 300 != 0) {
++        return;
++    }
++    fprintf(stderr, "[cos] scene-req-watch: %u calls in one step: fade %d, scene step %d, node step %d, proc %d, "
++                    "delete queue %d, overlap doing %d done %d\n", sCalls, i_sceneReq->mFadeRequest != NULL, scene,
++            node, (int)i_sceneReq->mCrtReq.mProcName, (int)g_fpcDtTg_Queue.mSize, (int)fopOvlpM_IsDoingReq(),
++            (int)fopOvlpM_IsDone());
++    int shown = 0;
++    for (node_class* n = g_fpcDtTg_Queue.mpHead; n != NULL && shown < 12; n = n->mpNextNode, shown++) {
++        delete_tag_class* tag = (delete_tag_class*)n;
++        base_process_class* proc = (base_process_class*)tag->base.mpTagData;
++        fprintf(stderr, "[cos] scene-req-watch:   deleting proc name %d id %u timer %d\n",
++                proc != NULL ? (int)proc->mProfName : -1, proc != NULL ? (unsigned)proc->mBsPcId : 0u,
++                (int)tag->mTimer);
++    }
++    fflush(stderr);
++}
++#endif
++
+ static cPhs_State fopScnRq_Execute(scene_request_class* i_sceneReq) {
++#if TARGET_PC
++    pc_fopScnRq_watch(i_sceneReq);
++#endif
+     cPhs_State phase_state = cPhs_Do(&i_sceneReq->mReqPhsProcCls, i_sceneReq);
+     switch (phase_state) {
+     case cPhs_NEXT_e:
+diff --git a/game/src/m_Do/m_Do_controller_pad.cpp b/game/src/m_Do/m_Do_controller_pad.cpp
+index f6eff388..78159254 100644
+--- a/game/src/m_Do/m_Do_controller_pad.cpp
++++ b/game/src/m_Do/m_Do_controller_pad.cpp
+@@ -14,6 +14,11 @@
+ #include "m_Do/m_Do_main.h"
+ #if TARGET_PC
+ #include "pc/pc_harness.h"
++#include "pc/pc_gameplay_options.h"
++#include "pc/pc_player_controls.h"
++#include "d/d_meter.h"
++#include "SSystem/SComponent/c_math.h"
++#include <cmath>
+ #endif
+ 
+ JUTGamePad* g_mDoCPd_gamePad[4];
+@@ -61,6 +66,22 @@ static s32 mDoCPd_Convert(interface_of_controller_pad* pInterface, JUTGamePad* p
+     mDoCPd_TRIGGER_CONV(pPad->getAnalogL(), pInterface->mTriggerLeft);
+     mDoCPd_TRIGGER_CONV(pPad->getAnalogR(), pInterface->mTriggerRight);
+ 
++#if TARGET_PC
++    const bool inventory = dMenu_flag() &&
++        (dMenu_getMenuStatus() == MENU_STATUS_ITEM || dMenu_getMenuStatus() == MENU_STATUS_COLLECT);
++    if (pc_gameplay_menu_direction(inventory && pc_gameplay_enabled(PC_GAMEPLAY_DPAD_MENUS),
++            pInterface->mButtonHold.left, pInterface->mButtonHold.right,
++            pInterface->mButtonHold.down, pInterface->mButtonHold.up,
++            pInterface->mMainStickPosX, pInterface->mMainStickPosY)) {
++        pInterface->mButtonHold.left = pInterface->mButtonHold.right = false;
++        pInterface->mButtonHold.down = pInterface->mButtonHold.up = false;
++        pInterface->mButtonTrig.left = pInterface->mButtonTrig.right = false;
++        pInterface->mButtonTrig.down = pInterface->mButtonTrig.up = false;
++        const float x = pInterface->mMainStickPosX, y = pInterface->mMainStickPosY;
++        pInterface->mMainStickValue = std::sqrt(x*x + y*y);
++        pInterface->mMainStickAngle = (x == 0.0f && y == 0.0f) ? 0 : cM_atan2s(x, -y);
++    }
++#endif
+     pInterface->mGamepadErrorFlags = pPad->getErrorStatus();
+     return 1;
+ }
+@@ -72,6 +93,9 @@ int mDoCPd_Read() {
+     pc_pad_feed();
+ #endif
+     JUTGamePad::read();
++#if TARGET_PC
++    pc_player_controls_poll();
++#endif
+ 
+ #if VERSION == VERSION_DEMO
+     if (!mDoRst::isReset()) {
+diff --git a/native/src/pc/features/pc_gyro.cpp b/native/src/pc/features/pc_gyro.cpp
+index dd3cc754..bb3ce8c8 100644
+--- a/native/src/pc/features/pc_gyro.cpp
++++ b/native/src/pc/features/pc_gyro.cpp
+@@ -99,6 +99,10 @@ void pc_aim_gyro_reset(void) {
+ }
+ 
+ int pc_aim_gyro_turn(int pad, float* yaw, float* pitch) {
++#if defined(__PROSPERO__)
++    *yaw = *pitch = 0.0f;
++    return 0;
++#endif
+     *yaw = 0.0f;
+     *pitch = 0.0f;
+     if (!pc_aim_gyro()) {
+diff --git a/native/src/pc/features/pc_qol.cpp b/native/src/pc/features/pc_qol.cpp
+index 194982e9..c6bdcb1e 100644
+--- a/native/src/pc/features/pc_qol.cpp
++++ b/native/src/pc/features/pc_qol.cpp
+@@ -47,6 +47,10 @@ int parse(int which, const char* v) {
+ extern "C" {
+ 
+ int pc_qol(PcQol which) {
++#if defined(__PROSPERO__)
++    // PS5 owns the gameplay options, but retains upstream correctness fixes.
++    return which == PC_QOL_FIX_BUGS;
++#endif
+     Option& o = sOptions[which];
+     if (o.value < 0) {
+         const char* v = getenv(o.key);
