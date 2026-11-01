@@ -1,0 +1,14 @@
+Controller prompts by Xelu
+https://thoseawesomeguys.com/prompts/
+
+Released under Creative Commons CC0 1.0 Universal (public domain dedication):
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The original PS5 PNGs are in ps5/assets/controller-ui/xelu/.
+ProsperoWake converts these to game textures and an ImGui atlas. Its layout
+instructions are applied to game resources loaded from the player's disc.
+The camera-eye artwork is also read from that disc and combined with Xelu's R3
+prompt at runtime. No original game layouts or camera artwork are bundled.
+
+The zoom arrows are generated artwork made for ProsperoWake, not Xelu assets.
+Their generator and artwork are provided under the MIT licence (MIT.txt).

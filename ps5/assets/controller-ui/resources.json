@@ -1,0 +1,164 @@
+{
+  "menures": {
+    "resources": {
+      "ba_base_01.bti": {
+        "size": 320,
+        "crc32": 636587815,
+        "sha256": "011f534f544032859ac6b77de508542e4281ed15edd5d29b1cca4df9ad2b8c20"
+      },
+      "ba_base_02.bti": {
+        "size": 1792,
+        "crc32": 1613051342,
+        "sha256": "4da246024fa79e2b30394cefa3032fd1a30cca4c0f01603ee5a07bd9fb1bcf72"
+      },
+      "ba_base_03.bti": {
+        "size": 4128,
+        "crc32": 207694439,
+        "sha256": "baecdb081520d36748a4e43ad9b0d2cb1612e22dd040c9d7437bfc63c2216e9d"
+      },
+      "ba_base_04.bti": {
+        "size": 1792,
+        "crc32": 1029160728,
+        "sha256": "e28ebeb2290a3f0873ec5c18ec60fb2243aeee0aeee0229cc6017a6147f20849"
+      },
+      "ba_base_05.bti": {
+        "size": 1056,
+        "crc32": 3494571994,
+        "sha256": "d4a05bd7ec75fa28765bc4d97535ecfc784ec64015ca1ebc6b548e0241119d10"
+      },
+      "ba_base_z.bti": {
+        "size": 640,
+        "crc32": 2068567720,
+        "sha256": "67445bb094356cd250af397f3ed9b198982711fcef6375d37ef6f866902e9de0"
+      },
+      "cross_key_00.bti": {
+        "size": 288,
+        "crc32": 3079968555,
+        "sha256": "c424da347b1136d0a897ad8b94f488f0b76aac7b579933f9d8fba57c2ea88f00"
+      },
+      "font_00.bti": {
+        "size": 352,
+        "crc32": 3041170918,
+        "sha256": "3382d9a9f05dcbd645f2f328838ca32952452cfd30556ab92996203af0a9cd6e"
+      },
+      "font_01.bti": {
+        "size": 352,
+        "crc32": 3642389375,
+        "sha256": "1644e2b29b9c76b356a45df2eade7cd158b671533eee6f3271cf32ea72e5576c"
+      },
+      "font_02.bti": {
+        "size": 352,
+        "crc32": 3947377805,
+        "sha256": "407c0c6eed6fdc72c1707e6aa8e0cc0820be43b0f5c931f759b5ac1ad54c331a"
+      },
+      "font_03.bti": {
+        "size": 352,
+        "crc32": 3610836437,
+        "sha256": "df531b734e3c275f6fa2b39fc07862ad7c26953203070620a2c6220b7bfe28df"
+      },
+      "font_04.bti": {
+        "size": 352,
+        "crc32": 1800961839,
+        "sha256": "11eabc9605b05ecb67eea62620a644d0f5ff5f53aaad6fa89029cc8c82a9372f"
+      },
+      "font_05.bti": {
+        "size": 352,
+        "crc32": 141279846,
+        "sha256": "a5a19cd0f262c2b5c19a4ef6c19fbd2ddab24294ed4ddc4bb860b02997530c3d"
+      },
+      "font_06.bti": {
+        "size": 352,
+        "crc32": 3913045523,
+        "sha256": "8e31463f9272577e90e96f5a64582f2a289da02c891b573cddf62d2820bffca2"
+      },
+      "font_07_01.bti": {
+        "size": 352,
+        "crc32": 2980764210,
+        "sha256": "1cd86d22c56e951165ccb27a30045fb79555ceed03a3947fdf0370a7c6041df3"
+      },
+      "font_07_02.bti": {
+        "size": 352,
+        "crc32": 705619697,
+        "sha256": "de4e5c88986a350462a543d888849b9f2f84613f619e8b3122c8444fa71c05bd"
+      },
+      "font_08.bti": {
+        "size": 352,
+        "crc32": 640459055,
+        "sha256": "8d60ce8645491b425c3d900508fa8fcf5de71af1265fb9dd5beceff1d55a7e10"
+      },
+      "font_08_2.bti": {
+        "size": 352,
+        "crc32": 3111630703,
+        "sha256": "526151a3690aa1fa72b464f13f58992656a0b288e471ddbe9920a2c3b9ef318f"
+      },
+      "font_08_up.bti": {
+        "size": 352,
+        "crc32": 3235165116,
+        "sha256": "8650a1a29cb7da852ecf0ad8eb9b8873e29ba76082863662dda180ef7117adc9"
+      },
+      "font_09.bti": {
+        "size": 352,
+        "crc32": 4293320114,
+        "sha256": "71b85408ed9e4b9da6443a35344719e19b874f654d2c963686dfa99aea576e44"
+      },
+      "font_09_02.bti": {
+        "size": 352,
+        "crc32": 2465630072,
+        "sha256": "9560588711d6941a2999b7475a19988961b7c8dccf46674ff55f46323752063a"
+      },
+      "font_11.bti": {
+        "size": 352,
+        "crc32": 3237419009,
+        "sha256": "661a6224a93e32854f906a8ccb84fdb1296fc7490fcbc111e1df24ec44394f8f"
+      },
+      "font_12.bti": {
+        "size": 352,
+        "crc32": 2323803612,
+        "sha256": "2fdd241c39ea9f215aef1d7a8d827194dbdd18870855e50655fd7e27fc41ec00"
+      },
+      "main_parts1.blo": {
+        "size": 8608,
+        "crc32": 1592673009,
+        "sha256": "6c44c247b92db886bd29ffd7930e88d129fe89308ad9e44bd3b4333d88033772"
+      }
+    }
+  },
+  "file_select_us": {
+    "resources": {
+      "ba_base_02.bti": {
+        "size": 1792,
+        "crc32": 1613051342,
+        "sha256": "4da246024fa79e2b30394cefa3032fd1a30cca4c0f01603ee5a07bd9fb1bcf72"
+      },
+      "ba_base_04.bti": {
+        "size": 1792,
+        "crc32": 1029160728,
+        "sha256": "e28ebeb2290a3f0873ec5c18ec60fb2243aeee0aeee0229cc6017a6147f20849"
+      },
+      "main_parts_fileselect.blo": {
+        "size": 640,
+        "crc32": 1889974345,
+        "sha256": "a4175157a2f56cdca5bf483391054757ae7fae977017d381fbf8013edf90d3ab"
+      }
+    }
+  },
+  "file_select_pal": {
+    "resources": {
+      "ba_base_02.bti": {
+        "size": 1792,
+        "crc32": 1613051342,
+        "sha256": "4da246024fa79e2b30394cefa3032fd1a30cca4c0f01603ee5a07bd9fb1bcf72"
+      },
+      "ba_base_04.bti": {
+        "size": 1792,
+        "crc32": 1029160728,
+        "sha256": "e28ebeb2290a3f0873ec5c18ec60fb2243aeee0aeee0229cc6017a6147f20849"
+      },
+      "main_parts_fileselect.blo": {
+        "size": 736,
+        "crc32": 1239278566,
+        "sha256": "16db52565db5bc53629dc39a3cb3f6c42dcdab627e1dcda129b121611c483e22"
+      }
+    }
+  }
+}

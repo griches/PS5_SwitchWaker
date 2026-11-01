@@ -1,0 +1,297 @@
+{
+  "game_id": "GZLP01",
+  "format": "P5UIRES3",
+  "source": "https://thoseawesomeguys.com/prompts/",
+  "author": "Xelu",
+  "license": "CC0-1.0",
+  "layout": "Rules applied to layouts read from the player disc",
+  "resources": [
+    {
+      "volume": "menures",
+      "name": "ba_base_01.bti",
+      "size": 18464,
+      "sha256": "67f39ae7d0442ed72db8617b22b5996a8d7350bdab95d75efe0ce19509aee94c",
+      "original_size": 320,
+      "original_sha256": "011f534f544032859ac6b77de508542e4281ed15edd5d29b1cca4df9ad2b8c20",
+      "prompt": "xelu/PS5_Triangle.png",
+      "prompt_sha256": "566d6fa9a4ff45c9f77822bdee532a2f10402caad7219f6a4601a3f81d79bcd9"
+    },
+    {
+      "volume": "menures",
+      "name": "ba_base_02.bti",
+      "size": 18464,
+      "sha256": "3110262f93373e512cefb94b5aff852c7018bb31dab61d285d478e3b7183f330",
+      "original_size": 1792,
+      "original_sha256": "4da246024fa79e2b30394cefa3032fd1a30cca4c0f01603ee5a07bd9fb1bcf72",
+      "prompt": "xelu/PS5_Square.png",
+      "prompt_sha256": "e99d2c2e825654fb778045a7dcbbfb612b51991161e759638ab87161bd1c2899"
+    },
+    {
+      "volume": "menures",
+      "name": "ba_base_03.bti",
+      "size": 18464,
+      "sha256": "e986023c6ad066917fc16fac9fee26ca14142f4f58c743ce55b71dff2c30f1bd",
+      "original_size": 4128,
+      "original_sha256": "baecdb081520d36748a4e43ad9b0d2cb1612e22dd040c9d7437bfc63c2216e9d",
+      "prompt": "xelu/PS5_Cross.png",
+      "prompt_sha256": "fcc46fba8272fdb4504be36491945359b6ce2f67a7f59818cfa53fc8cd4862a2"
+    },
+    {
+      "volume": "menures",
+      "name": "ba_base_04.bti",
+      "size": 18464,
+      "sha256": "e986023c6ad066917fc16fac9fee26ca14142f4f58c743ce55b71dff2c30f1bd",
+      "original_size": 1792,
+      "original_sha256": "e28ebeb2290a3f0873ec5c18ec60fb2243aeee0aeee0229cc6017a6147f20849",
+      "prompt": "xelu/PS5_Cross.png",
+      "prompt_sha256": "fcc46fba8272fdb4504be36491945359b6ce2f67a7f59818cfa53fc8cd4862a2"
+    },
+    {
+      "volume": "menures",
+      "name": "ba_base_05.bti",
+      "size": 18464,
+      "sha256": "4421884ba5e35a2885cde7b765507d289d26568d03ebd491c55b378d3ad9c1d0",
+      "original_size": 1056,
+      "original_sha256": "d4a05bd7ec75fa28765bc4d97535ecfc784ec64015ca1ebc6b548e0241119d10",
+      "prompt": "xelu/PS5_R2.png",
+      "prompt_sha256": "3556bc519fc8c26e4ba3c706c33ae37b2ce4ca40a58e336a46ce9171de738aca"
+    },
+    {
+      "volume": "menures",
+      "name": "ba_base_z.bti",
+      "size": 18464,
+      "sha256": "639cf2658b60ea17a74448b14eecb509b9706009b2e93dd67f3bbb3ccfd51514",
+      "original_size": 640,
+      "original_sha256": "67445bb094356cd250af397f3ed9b198982711fcef6375d37ef6f866902e9de0",
+      "prompt": "xelu/PS5_R1.png",
+      "prompt_sha256": "b41fc6c4e8ca392bdafde0e024e956f74995a74f3933bdb49859e36857ebcee5"
+    },
+    {
+      "volume": "menures",
+      "name": "cross_key_00.bti",
+      "size": 4640,
+      "sha256": "7c91182795d8f397637dd5d049374c18694bf7daa42909eca58c966147ef1432",
+      "original_size": 288,
+      "original_sha256": "c424da347b1136d0a897ad8b94f488f0b76aac7b579933f9d8fba57c2ea88f00",
+      "prompt": "xelu/PS5_Dpad.png",
+      "prompt_sha256": "b5fc142ca48a41574adeebee90827da76e63188fbf9d9067b04a5e4290efae9e"
+    },
+    {
+      "volume": "menures",
+      "name": "font_00.bti",
+      "size": 18464,
+      "sha256": "e986023c6ad066917fc16fac9fee26ca14142f4f58c743ce55b71dff2c30f1bd",
+      "original_size": 352,
+      "original_sha256": "3382d9a9f05dcbd645f2f328838ca32952452cfd30556ab92996203af0a9cd6e",
+      "prompt": "xelu/PS5_Cross.png",
+      "prompt_sha256": "fcc46fba8272fdb4504be36491945359b6ce2f67a7f59818cfa53fc8cd4862a2"
+    },
+    {
+      "volume": "menures",
+      "name": "font_01.bti",
+      "size": 18464,
+      "sha256": "3110262f93373e512cefb94b5aff852c7018bb31dab61d285d478e3b7183f330",
+      "original_size": 352,
+      "original_sha256": "1644e2b29b9c76b356a45df2eade7cd158b671533eee6f3271cf32ea72e5576c",
+      "prompt": "xelu/PS5_Square.png",
+      "prompt_sha256": "e99d2c2e825654fb778045a7dcbbfb612b51991161e759638ab87161bd1c2899"
+    },
+    {
+      "volume": "menures",
+      "name": "font_02.bti",
+      "size": 18464,
+      "sha256": "c9a3a96380eb44787a5dbb93242bf55ecca360d50f4aab02a1e3ca795db398d3",
+      "original_size": 352,
+      "original_sha256": "407c0c6eed6fdc72c1707e6aa8e0cc0820be43b0f5c931f759b5ac1ad54c331a",
+      "prompt": "xelu/PS5_Circle.png",
+      "prompt_sha256": "2a328b6588ed8dfa3755bb49be35d4987cf10c3ace874de3b3904d53e26d30fa"
+    },
+    {
+      "volume": "menures",
+      "name": "font_03.bti",
+      "size": 18464,
+      "sha256": "67f39ae7d0442ed72db8617b22b5996a8d7350bdab95d75efe0ce19509aee94c",
+      "original_size": 352,
+      "original_sha256": "df531b734e3c275f6fa2b39fc07862ad7c26953203070620a2c6220b7bfe28df",
+      "prompt": "xelu/PS5_Triangle.png",
+      "prompt_sha256": "566d6fa9a4ff45c9f77822bdee532a2f10402caad7219f6a4601a3f81d79bcd9"
+    },
+    {
+      "volume": "menures",
+      "name": "font_04.bti",
+      "size": 18464,
+      "sha256": "54efe8594ecbc49d290f5ee15e0f9d95c464b7d2eb96747e214928f9e66e02e7",
+      "original_size": 352,
+      "original_sha256": "11eabc9605b05ecb67eea62620a644d0f5ff5f53aaad6fa89029cc8c82a9372f",
+      "prompt": "xelu/PS5_L2.png",
+      "prompt_sha256": "4604de0a223e03147d4718d52d560573a6e5aee93a97f11f21823ce5dc9ea661"
+    },
+    {
+      "volume": "menures",
+      "name": "font_05.bti",
+      "size": 18464,
+      "sha256": "4421884ba5e35a2885cde7b765507d289d26568d03ebd491c55b378d3ad9c1d0",
+      "original_size": 352,
+      "original_sha256": "a5a19cd0f262c2b5c19a4ef6c19fbd2ddab24294ed4ddc4bb860b02997530c3d",
+      "prompt": "xelu/PS5_R2.png",
+      "prompt_sha256": "3556bc519fc8c26e4ba3c706c33ae37b2ce4ca40a58e336a46ce9171de738aca"
+    },
+    {
+      "volume": "menures",
+      "name": "font_06.bti",
+      "size": 18464,
+      "sha256": "639cf2658b60ea17a74448b14eecb509b9706009b2e93dd67f3bbb3ccfd51514",
+      "original_size": 352,
+      "original_sha256": "8e31463f9272577e90e96f5a64582f2a289da02c891b573cddf62d2820bffca2",
+      "prompt": "xelu/PS5_R1.png",
+      "prompt_sha256": "b41fc6c4e8ca392bdafde0e024e956f74995a74f3933bdb49859e36857ebcee5"
+    },
+    {
+      "volume": "menures",
+      "name": "font_07_01.bti",
+      "size": 18464,
+      "sha256": "cbe61e0cf10605458a1ddeb3f88999788dec6c71c366af25c76f8a855924f69b",
+      "original_size": 352,
+      "original_sha256": "1cd86d22c56e951165ccb27a30045fb79555ceed03a3947fdf0370a7c6041df3",
+      "prompt": "xelu/PS5_Left_Stick.png",
+      "prompt_sha256": "5589657ff7106e2c0e13253a128c9843d042672cecbbe595b50d550ca0c6f896"
+    },
+    {
+      "volume": "menures",
+      "name": "font_07_02.bti",
+      "size": 18464,
+      "sha256": "cbe61e0cf10605458a1ddeb3f88999788dec6c71c366af25c76f8a855924f69b",
+      "original_size": 352,
+      "original_sha256": "de4e5c88986a350462a543d888849b9f2f84613f619e8b3122c8444fa71c05bd",
+      "prompt": "xelu/PS5_Left_Stick.png",
+      "prompt_sha256": "5589657ff7106e2c0e13253a128c9843d042672cecbbe595b50d550ca0c6f896"
+    },
+    {
+      "volume": "menures",
+      "name": "font_08.bti",
+      "size": 18464,
+      "sha256": "c87506450439a2a238a5d6cd254180d0cd12188bc8f2b119546111a413d7e0d4",
+      "original_size": 352,
+      "original_sha256": "8d60ce8645491b425c3d900508fa8fcf5de71af1265fb9dd5beceff1d55a7e10",
+      "prompt": "xelu/PS5_Dpad.png",
+      "prompt_sha256": "b5fc142ca48a41574adeebee90827da76e63188fbf9d9067b04a5e4290efae9e"
+    },
+    {
+      "volume": "menures",
+      "name": "font_08_2.bti",
+      "size": 18464,
+      "sha256": "98accf40935e6b049aaa3299eb982f155d3d56addbdbf3f8b7758e0ae2a0bd9f",
+      "original_size": 352,
+      "original_sha256": "526151a3690aa1fa72b464f13f58992656a0b288e471ddbe9920a2c3b9ef318f",
+      "prompt": "xelu/PS5_Dpad_Left.png",
+      "prompt_sha256": "fbc937877d6f6573261844a07934017971b9e658749442d53666a7389c40d826"
+    },
+    {
+      "volume": "menures",
+      "name": "font_08_up.bti",
+      "size": 18464,
+      "sha256": "417a24a0eadddb3b9cda10d60945602b6b197162cff9d3550203ac1039d5ec6b",
+      "original_size": 352,
+      "original_sha256": "8650a1a29cb7da852ecf0ad8eb9b8873e29ba76082863662dda180ef7117adc9",
+      "prompt": "xelu/PS5_Dpad_Up.png",
+      "prompt_sha256": "bdabb026aaee88e660546c44eb4cdf4a17e3fcf9a3701d8f018f7b5090d94f32"
+    },
+    {
+      "volume": "menures",
+      "name": "font_09.bti",
+      "size": 18464,
+      "sha256": "c81f14315dab4b751305e6f2b0bc4e0a975ecd4bac258f29f4a55243ecc12d3a",
+      "original_size": 352,
+      "original_sha256": "71b85408ed9e4b9da6443a35344719e19b874f654d2c963686dfa99aea576e44",
+      "prompt": "xelu/PS5_Right_Stick.png",
+      "prompt_sha256": "f6d26c0b7a3a887f58a14907e74e54ef684f77e5db444f477fdd709ac072029b"
+    },
+    {
+      "volume": "menures",
+      "name": "font_09_02.bti",
+      "size": 18464,
+      "sha256": "c81f14315dab4b751305e6f2b0bc4e0a975ecd4bac258f29f4a55243ecc12d3a",
+      "original_size": 352,
+      "original_sha256": "9560588711d6941a2999b7475a19988961b7c8dccf46674ff55f46323752063a",
+      "prompt": "xelu/PS5_Right_Stick.png",
+      "prompt_sha256": "f6d26c0b7a3a887f58a14907e74e54ef684f77e5db444f477fdd709ac072029b"
+    },
+    {
+      "volume": "menures",
+      "name": "font_11.bti",
+      "size": 18464,
+      "sha256": "d67358818cdbfdca4d6ccda25cde2530fb89c6f4dc6d2ee3de6fdcf3ac2189df",
+      "original_size": 352,
+      "original_sha256": "661a6224a93e32854f906a8ccb84fdb1296fc7490fcbc111e1df24ec44394f8f",
+      "prompt": "xelu/PS5_Options.png",
+      "prompt_sha256": "56daa6b3eaa192543ad753e1d71075c64604c06778bb061923ef48d3641884cd"
+    },
+    {
+      "volume": "menures",
+      "name": "font_12.bti",
+      "size": 18464,
+      "sha256": "e986023c6ad066917fc16fac9fee26ca14142f4f58c743ce55b71dff2c30f1bd",
+      "original_size": 352,
+      "original_sha256": "2fdd241c39ea9f215aef1d7a8d827194dbdd18870855e50655fd7e27fc41ec00",
+      "prompt": "xelu/PS5_Cross.png",
+      "prompt_sha256": "fcc46fba8272fdb4504be36491945359b6ce2f67a7f59818cfa53fc8cd4862a2"
+    },
+    {
+      "volume": "menures",
+      "name": "main_parts1.blo",
+      "size": 2400,
+      "sha256": "9027cd4a67297513d315d1f7de670b3715dc94cf8861847ce2db9991e5656809",
+      "original_size": 8608,
+      "original_sha256": "6c44c247b92db886bd29ffd7930e88d129fe89308ad9e44bd3b4333d88033772"
+    },
+    {
+      "volume": "file_select",
+      "name": "ba_base_02.bti",
+      "size": 18464,
+      "sha256": "3110262f93373e512cefb94b5aff852c7018bb31dab61d285d478e3b7183f330",
+      "original_size": 1792,
+      "original_sha256": "4da246024fa79e2b30394cefa3032fd1a30cca4c0f01603ee5a07bd9fb1bcf72",
+      "prompt": "xelu/PS5_Square.png",
+      "prompt_sha256": "e99d2c2e825654fb778045a7dcbbfb612b51991161e759638ab87161bd1c2899"
+    },
+    {
+      "volume": "file_select",
+      "name": "ba_base_04.bti",
+      "size": 18464,
+      "sha256": "e986023c6ad066917fc16fac9fee26ca14142f4f58c743ce55b71dff2c30f1bd",
+      "original_size": 1792,
+      "original_sha256": "e28ebeb2290a3f0873ec5c18ec60fb2243aeee0aeee0229cc6017a6147f20849",
+      "prompt": "xelu/PS5_Cross.png",
+      "prompt_sha256": "fcc46fba8272fdb4504be36491945359b6ce2f67a7f59818cfa53fc8cd4862a2"
+    },
+    {
+      "volume": "file_select",
+      "name": "main_parts_fileselect.blo",
+      "size": 672,
+      "sha256": "0f5d44c35c5ddbbd9e7ca7962cdbf2064d19b6dda292ca161d67d031bade7b77",
+      "original_size": 736,
+      "original_sha256": "16db52565db5bc53629dc39a3cb3f6c42dcdab627e1dcda129b121611c483e22"
+    },
+    {
+      "volume": "prosperowake",
+      "name": "camera_self.bti",
+      "size": 8224,
+      "sha256": "642c6bf0a5c29403b965e52e40a7863d8d4083f1e820c9923a16a29d80c004d6",
+      "original_size": 0,
+      "sources": [
+        "xelu/PS5_Right_Stick_Click.png"
+      ]
+    },
+    {
+      "volume": "prosperowake",
+      "name": "zoom_arrow.bti",
+      "size": 18464,
+      "sha256": "7f4af1f76bb0c8d54e41f07f1da56f21c7cc150ab15064ce0cbe7f223440c13e",
+      "original_size": 0,
+      "author": "ProsperoWake",
+      "license": "MIT",
+      "source": "generate-controller-ui.py:zoom_arrow"
+    }
+  ],
+  "bundle_sha256": "d5478c40c90a9ab22990c0225721248cae83e51dec843be974e79d40cbc55302"
+}
