@@ -1,0 +1,51 @@
+[
+  {
+    "name": "010-ps5-platform.patch",
+    "purpose": "ps5 platform",
+    "paths": [
+      "lib/aurora.cpp",
+      "lib/dawn/BackendBinding.cpp",
+      "lib/dolphin/pad/pad.cpp",
+      "lib/imgui.cpp",
+      "lib/card/CardGciFolder.cpp"
+    ],
+    "base": "SwitchWaker native/cmake/Aurora.cmake plus its native/patches/aurora series",
+    "upstreamability": "PS5 integration; assess portable correctness fixes separately",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "030-renderer-integration.patch",
+    "purpose": "renderer integration",
+    "paths": [
+      "include/aurora/aurora.h",
+      "lib/gfx/encoding.cpp",
+      "lib/gfx/frame.cpp",
+      "lib/gfx/frame_packet.hpp",
+      "lib/gfx/pipeline_cache.cpp",
+      "lib/gfx/recording.cpp",
+      "lib/gfx/texture.cpp",
+      "lib/gx/gx.cpp",
+      "lib/gfx/render_worker.cpp",
+      "lib/webgpu/gpu.cpp"
+    ],
+    "base": "SwitchWaker native/cmake/Aurora.cmake plus its native/patches/aurora series",
+    "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "040-renderer-checks.patch",
+    "purpose": "renderer checks",
+    "paths": [
+      "tests/render_worker_test.cpp"
+    ],
+    "base": "SwitchWaker native/cmake/Aurora.cmake plus its native/patches/aurora series",
+    "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  }
+]

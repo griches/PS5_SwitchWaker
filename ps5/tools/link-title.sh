@@ -3,7 +3,7 @@
 #
 #   link-title.sh BUILD_DIR PS5_VULKAN_DIR SDK OBJECT...
 #
-# Run by the build (ps5/CMakeLists.txt) once the objects are compiled. The link
+# Run by the build (ps5/cmake/ps5-game.cmake) once the objects are compiled. The link
 # is PS5_Vulkan's: its RADV release archive (RADV, ACO, NIR and Mesa's runtime,
 # built from PS5_Mesa), its link recipe (tools/radv-link.sh: the platform layer
 # of this title's SDK pin, the heap and thread wraps, the libc names bound to ps5_*),
@@ -57,44 +57,24 @@ archive=${RADV_ARCHIVE:-$vulkan/.deps/native/radv-release/lib/libvulkan_radeon.p
 export PS5_CLANG=${PS5_CLANG:-$(command -v clang || true)}
 tool="$vulkan/build/host/ps5-native-tool"
 native="$vulkan/tooling/native"
-param="$ps5/sce_sys/param.json"
+param="$work/param.json"
 
 for file in "$archive" "$tool" "$param" "$sdk/bin/prospero-lld" "$vulkan/tools/radv-link.sh" \
         "$vulkan/runtime/libc.prx"; do
     [[ -e $file ]] || { echo "missing: $file" >&2; exit 2; }
 done
-mkdir -p "$work/link/obj" "$work/link/stubs"
-cc() { PS5_PAYLOAD_SDK="$sdk" sh "$vulkan/tooling/prospero-clang18" "$@"; }
-
-# The CRT, as in
-# PS5_Vulkan's CTS title.
-cc -std=c++20 -O2 -fno-exceptions -fno-rtti -c "$native/app_crt.cpp" -o "$work/link/obj/app_crt.o"
-# RADV calls AGC, which the SDK has no stubs for: these name its imports.
-stub() {
-    local library=$1 source=$2
-    cc -std=c11 -O2 -fPIC -c "$vulkan/$source" -o "$work/link/obj/${library}_stub.o"
-    "$sdk/bin/prospero-lld" --shared -soname "${library}.prx" \
-        -o "$work/link/stubs/${library}.so" "$work/link/obj/${library}_stub.o"
-}
-stub libSceAgc vendor/ps5/sdk/stubs/agc_canary_link_stub.c
-stub libSceAgcDriver vendor/ps5/sdk/stubs/agc_driver_canary_link_stub.c
+for file in "$work/link/obj/app_crt.o" "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so"; do
+    [[ -f $file ]] || { echo "missing link prerequisite: $file" >&2; exit 2; }
+done
 
 # shellcheck source=/dev/null
 source "$vulkan/tools/radv-link.sh"
 radv_link_recipe "$vulkan" "$sdk" "$archive" || exit 2
-# localeconv in the C locale, '.' the decimal point (the console's gives none, and
-# tinygltf's JSON parser then read 0.62 as 0): the platform layer's since SDK fork
-# 6b63a2a (tools/setup-sdk.sh's pin is never older), bound by PS5_Vulkan's recipe
-# since its 6a6dfa6. With an older recipe the title binds it here, kept local as
-# the recipe keeps its bound names. The symbol listing is read whole before it
-# is searched: piped into grep -q under pipefail, llvm-nm's SIGPIPE made the
-# found symbol a miss about half the time once the archive grew (SDK 611893f).
-platform_has_localeconv=false
-grep -q " T ps5_localeconv$" <<<"$("$sdk/bin/llvm-nm" --defined-only "$sdk/target/lib/libps5platform.a" 2>/dev/null)" &&
-    platform_has_localeconv=true
-if $platform_has_localeconv && [[ " ${radv_link_flags[*]} " != *" --defsym=localeconv=ps5_localeconv "* ]]; then
-    printf '{\n    local:\n        localeconv;\n};\n' > "$work/link/localeconv-local.map"
-    radv_link_flags+=(--defsym=localeconv=ps5_localeconv --version-script "$work/link/localeconv-local.map")
+# Require the current PS5_Vulkan recipe's locale binding. Do not maintain a
+# second link recipe here: a missing binding makes glTF fractions parse as zero.
+if [[ " ${radv_link_flags[*]} " != *" --defsym=localeconv=ps5_localeconv "* ]]; then
+    echo "link-title.sh: PS5_Vulkan must supply localeconv=ps5_localeconv; update its link recipe and SDK" >&2
+    exit 2
 fi
 # std::jthread and std::stop_token are libc++'s experimental library in the SDK's LLVM 18
 experimental=()
@@ -137,10 +117,14 @@ fi
     "$work/link/stubs/libSceAgc.so" "$work/link/stubs/libSceAgcDriver.so" \
     "${radv_link_inputs[@]}" \
     --as-needed "$sdk"/target/lib/*.so
+# Confirm the delayed-cleanup emutls implementation survived the final link.
+if ! grep -aFq 'ps5 emutls: skip destructor rounds 1' "$work/link/llvm-pie.elf"; then
+    echo "link-title.sh: delayed-cleanup emutls runtime was not linked" >&2
+    exit 1
+fi
 # A title whose localeconv is still the console's reads every glTF fraction as 0
 # (black materials, models scaled to nothing): refuse it here, not on the console
-if $platform_has_localeconv &&
-        grep -q " U localeconv$" <<<"$("$sdk/bin/llvm-nm" "$work/link/llvm-pie.elf" 2>/dev/null)"; then
+if grep -q " U localeconv$" <<<"$("$sdk/bin/llvm-nm" "$work/link/llvm-pie.elf" 2>/dev/null)"; then
     echo "link-title.sh: localeconv is not bound to the platform layer's ps5_localeconv" >&2
     exit 1
 fi
@@ -166,53 +150,5 @@ fi
     --stub "$work/link/stubs/libSceAgcDriver.so" --module-sdk 0x02000009 \
     --companion-sdk 0x08050001 --file-name eboot.elf
 
-# The title folder
-title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$param")
-app="$root/dist/$title_id"
-mkdir -p "$app/sce_sys" "$app/sce_module"
-"$tool" self --sign --in "$work/eboot.elf.new" --out "$app/eboot.bin" --magic 0x1D3D154F
-"$tool" self --inspect --file "$app/eboot.bin" > /dev/null
-cp "$param" "$app/sce_sys/param.json"
-for asset in icon0.png pic0.dds pic1.dds snd0.at9; do
-    [[ -f $ps5/sce_sys/$asset ]] && cp "$ps5/sce_sys/$asset" "$app/sce_sys/$asset"
-done
-(cd "$vulkan/runtime" && sha256sum --check --strict --quiet libc.prx.sha256)
-cp "$vulkan/runtime/libc.prx" "$app/sce_module/libc.prx"
-mv "$work/eboot.elf.new" "$work/eboot.elf"
-# The linked ELF of the title last packaged, for tools/run.sh to symbolise a crash with
-# (the game's build tree may be on the VM's own disk)
-mkdir -p "$root/build"
-cp "$work/link/llvm-pie.elf" "$root/build/last-title.elf"
-archive_revision=$(sed -n 's/^revision: //p' "$(dirname "$(dirname "$archive")")/PROVENANCE.txt" 2>/dev/null || true)
-printf '==> %s: %s (eboot.bin %s bytes; RADV %s)\n' "$title_id" "$app" \
-    "$(stat -c %s "$app/eboot.bin")" "${archive_revision:0:11}"
-# The list of render pipelines the game uses, compiled while it starts: pipeline
-# keys recorded from runs of the game, no game data (docs/SWITCH_BUILD.md)
-upstream="$root/vendor/switchwaker"
-cp "$upstream/native/data/initial_pipeline_cache.db" "$app/initial_pipeline_cache.db"
-# The DualSense's symbols for the game's button prompts, once there are any (ps5/art/glyphs)
-rm -rf "$app/res"
-if compgen -G "$ps5/art/glyphs/*.png" > /dev/null; then
-    mkdir -p "$app/res/ps5-glyphs"
-    cp "$ps5"/art/glyphs/*.png "$app/res/ps5-glyphs/"
-fi
-# The shader caches a console filled on a first start (ps5/shader-cache: Dawn's
-# cache and the driver's), copied into place by a start that finds none
-# (ps5/src/startup.c): every console has the same GPU and this title's driver, so
-# the first start need not compile three thousand pipelines again
-if [[ -f $ps5/shader-cache/dawn_cache.db ]]; then
-    mkdir -p "$app/res/shader-cache"
-    cp -R "$ps5/shader-cache/." "$app/res/shader-cache/"
-fi
-# The licences beside eboot.bin
-mkdir -p "$app/licenses"
-cp "$upstream/LICENSE" "$app/licenses/SwitchWaker-LICENSE.txt"
-cp "$upstream/game/LICENSE" "$app/licenses/SwitchWaker-game-LICENSE.txt"
-cp "$upstream/native/dsp_hle/LICENSE" "$app/licenses/Dolphin-DSPHLE-LICENSE.txt"
-cp "$upstream/THIRD_PARTY.md" "$app/licenses/SwitchWaker-THIRD_PARTY.md"
-cp "$root/.deps/aurora/LICENSE" "$app/licenses/Aurora-LICENSE.txt"
-cp "$vulkan/LICENSE" "$app/licenses/PS5_Vulkan-LICENSE.txt"
-# The title's integer division instructions, for the SIGFPE handler that finishes a division by
-# zero as the GameCube and ARM do (the console's code cannot be read at run time)
-mkdir -p "$app/res"
-python3 "$ps5/tools/make-div-table.py" "$work/link/llvm-pie.elf" "$app/res/div-table.bin"
+# Package only after the linked ELF passed all import/runtime checks.
+bash "$ps5/tools/package-title.sh" "$work" "$vulkan" "$sdk" "$archive"

@@ -1,3 +1,23 @@
 [submodule "vendor/switchwaker"]
 	path = vendor/switchwaker
 	url = https://github.com/centollOS/SwitchWaker.git
+[submodule "dependencies/aurora"]
+	path = .deps/aurora
+	url = https://github.com/encounter/aurora.git
+	shallow = true
+[submodule "dependencies/dawn"]
+	path = .deps/dawn
+	url = https://github.com/encounter/dawn.git
+	shallow = true
+[submodule "dependencies/sdl"]
+	path = .deps/SDL
+	url = https://github.com/libsdl-org/SDL.git
+	shallow = true
+[submodule "dependencies/recompcore"]
+	path = .deps/recompcore
+	url = https://github.com/elliotttate/RecompCore.git
+	shallow = true
+[submodule "dependencies/decomp"]
+	path = .deps/decomp
+	url = https://github.com/snrubrm/tww.git
+	shallow = true

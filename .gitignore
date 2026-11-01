@@ -12,3 +12,7 @@ imgui.ini
 *.gcm
 *.rvz
 *.gci
+
+# Python tooling caches
+__pycache__/
+*.py[cod]

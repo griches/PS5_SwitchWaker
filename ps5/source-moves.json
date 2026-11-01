@@ -1,0 +1,102 @@
+[
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_camera_controls.h",
+    "to": "ps5/include/pc/pc_camera_controls.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_distant_islands.h",
+    "to": "ps5/include/pc/pc_distant_islands.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_fast_load.h",
+    "to": "ps5/include/pc/pc_fast_load.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_gameplay_menu.h",
+    "to": "ps5/include/pc/pc_gameplay_menu.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_gameplay_options.h",
+    "to": "ps5/include/pc/pc_gameplay_options.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_haptics.h",
+    "to": "ps5/include/pc/pc_haptics.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_hd_visuals.h",
+    "to": "ps5/include/pc/pc_hd_visuals.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_menu_policy.h",
+    "to": "ps5/include/pc/pc_menu_policy.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_picto_geometry.h",
+    "to": "ps5/include/pc/pc_picto_geometry.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_picto_readback.h",
+    "to": "ps5/include/pc/pc_picto_readback.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_player_controls.h",
+    "to": "ps5/include/pc/pc_player_controls.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/include/pc/pc_quick_doors.h",
+    "to": "ps5/include/pc/pc_quick_doors.h"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/features/pc_camera_controls.cpp",
+    "to": "ps5/src/features/pc_camera_controls.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/features/pc_gameplay_options.cpp",
+    "to": "ps5/src/features/pc_gameplay_options.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/features/pc_player_controls.cpp",
+    "to": "ps5/src/features/pc_player_controls.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/game_hooks/pc_camera_controls.cpp",
+    "to": "ps5/src/game_hooks/pc_camera_controls.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/game_hooks/pc_distant_islands.cpp",
+    "to": "ps5/src/game_hooks/pc_distant_islands.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/game_hooks/pc_fast_load.cpp",
+    "to": "ps5/src/game_hooks/pc_fast_load.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/game_hooks/pc_haptics.cpp",
+    "to": "ps5/src/game_hooks/pc_haptics.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/game_hooks/pc_hd_visuals.cpp",
+    "to": "ps5/src/game_hooks/pc_hd_visuals.cpp"
+  },
+  {
+    "from": "vendor/switchwaker/native/src/pc/game_hooks/pc_quick_doors.cpp",
+    "to": "ps5/src/game_hooks/pc_quick_doors.cpp"
+  },
+  {
+    "from": ".deps/aurora/lib/gfx/post_fx.cpp",
+    "to": "ps5/aurora/gfx/post_fx.cpp"
+  },
+  {
+    "from": ".deps/aurora/lib/gfx/post_fx.hpp",
+    "to": "ps5/aurora/gfx/post_fx.hpp"
+  },
+  {
+    "from": ".deps/aurora/lib/gfx/post_fx_region.hpp",
+    "to": "ps5/aurora/gfx/post_fx_region.hpp"
+  },
+  {
+    "from": ".deps/aurora/lib/gfx/pipeline_policy.hpp",
+    "to": "ps5/aurora/gfx/pipeline_policy.hpp"
+  }
+]

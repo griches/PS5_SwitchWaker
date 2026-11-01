@@ -3,8 +3,10 @@
 #
 #   ps5/tools/deploy.sh [--all]
 #
-# PS5_Vulkan's deploy tool uploads what changed (eboot.bin always), over the
+# PS5_Vulkan's deploy tool uploads files with changed sizes, over the
 # console's FTP server, with the address from PS5_Vulkan's .env.
+# Always refresh the executable and owned UI/artwork: texture and bundle contents
+# can change without changing their byte size.
 #
 # Copyright (C) 2026 Mihawk
 # SPDX-License-Identifier: MIT
@@ -14,4 +16,9 @@ root=$(dirname "$ps5")
 vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}" && pwd)
 title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$ps5/sce_sys/param.json")
 [[ -d $root/dist/$title_id ]] || { echo "no dist/$title_id: run ps5/tools/build.sh first" >&2; exit 2; }
-exec python3 "$vulkan/tools/deploy-title-folder.py" --always eboot.bin "$root/dist/$title_id" "$@"
+exec python3 "$vulkan/tools/deploy-title-folder.py" --always eboot.bin \
+    --always sce_sys/icon0.png --always sce_sys/pic0.dds --always sce_sys/pic1.dds \
+    --always res/resources-us.bin \
+    --always res/resources-pal.bin \
+    --always res/menu-prompts.rgba \
+    "$root/dist/$title_id" "$@"

@@ -20,18 +20,38 @@ foreach(required PS5_PORT_DIR PS5_VULKAN_DIR DAWN_DIR SDL_DIR)
 	endif()
 endforeach()
 set(ps5 ${PS5_PORT_DIR}/ps5)
-
+# Keep __FILE__, source_location and debug records useful without exposing the
+# developer's home directory. Changed command lines invalidate existing objects.
+function(ps5_map_source_path directory replacement)
+    if(NOT directory)
+        return()
+    endif()
+    file(REAL_PATH "${directory}" canonical)
+    add_compile_options("-ffile-prefix-map=${directory}=${replacement}"
+                        "-ffile-prefix-map=${canonical}=${replacement}")
+endfunction()
+ps5_map_source_path("${PS5_PORT_DIR}" "src/ProsperoWake")
+ps5_map_source_path("${PS5_VULKAN_DIR}" "src/PS5_Vulkan")
+ps5_map_source_path("${PS5_PAYLOAD_SDK}" "sdk")
+ps5_map_source_path("${CMAKE_BINARY_DIR}" "build")
+add_compile_options(-fdebug-compilation-dir=.)
 # -fno-omit-frame-pointer: the console's crash backtraces are frame-pointer walks.
 add_compile_options(-g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer)
 # An init array, in the order the source has: tools/cc-init-array.sh has the reason
-set(CMAKE_C_COMPILER_LAUNCHER sh ${ps5}/tools/cc-init-array.sh)
-set(CMAKE_CXX_COMPILER_LAUNCHER sh ${ps5}/tools/cc-init-array.sh)
+# Encode SDK LLVM selection in Ninja commands, so changing it invalidates objects.
+set(CMAKE_C_COMPILER_LAUNCHER "${CMAKE_COMMAND}" -E env "LLVM_CONFIG=$ENV{LLVM_CONFIG}"
+    sh "${ps5}/tools/cc-init-array.sh")
+set(CMAKE_CXX_COMPILER_LAUNCHER ${CMAKE_C_COMPILER_LAUNCHER})
 # The SDK's libc++ is LLVM 18's, where std::jthread and std::stop_token (Aurora's
 # threads) are still experimental: tools/link-title.sh links libc++experimental.a
 add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fexperimental-library>)
 
-# The console: klog, the pad, the title's exit, and the libc names a title cannot import
-add_library(ps5_platform STATIC ${ps5}/src/platform.c ${ps5}/src/shims.c ${ps5}/src/startup.c)
+# The console: klog, the pad, the title's exit, and the libc names a title cannot import.
+# emutls.c is compiler-rt's, built with one skipped pthread destructor round and linked
+# whole, ahead of libclang_rt.builtins, so its __emutls_get_address replaces that copy.
+add_library(ps5_platform STATIC ${ps5}/src/platform.c ${ps5}/src/shims.c ${ps5}/src/startup.c
+		${ps5}/src/emutls.c)
+target_compile_definitions(ps5_platform PRIVATE EMUTLS_SKIP_DESTRUCTOR_ROUNDS=1)
 target_include_directories(ps5_platform PUBLIC ${ps5}/src)
 target_include_directories(ps5_platform PRIVATE ${SDL_DIR}/include)
 file(READ ${ps5}/sce_sys/param.json param_json)
@@ -73,7 +93,7 @@ foreach(off SDL_SHARED SDL_TEST_LIBRARY SDL_TESTS SDL_EXAMPLES SDL_INSTALL
 		SDL_OPENGL SDL_OPENGLES SDL_VULKAN SDL_GPU SDL_RENDER_GPU SDL_CAMERA SDL_OPENVR
 		SDL_OSS SDL_ALSA SDL_JACK SDL_PIPEWIRE SDL_PULSEAUDIO SDL_SNDIO SDL_DISKAUDIO SDL_DUMMYAUDIO
 		SDL_DBUS SDL_IBUS SDL_LIBURING SDL_LIBUDEV SDL_HIDAPI SDL_HIDAPI_LIBUSB SDL_VIRTUAL_JOYSTICK
-		SDL_DLOPEN_NOTES SDL_DEPS_SHARED SDL_ASSEMBLY_UNUSED)
+		SDL_DLOPEN_NOTES SDL_DEPS_SHARED)
 	set(${off} OFF CACHE BOOL "" FORCE)
 endforeach()
 add_subdirectory(${SDL_DIR} ${CMAKE_BINARY_DIR}/sdl EXCLUDE_FROM_ALL)
@@ -103,8 +123,8 @@ function(ps5_late_fixes)
 	# libraries, the RADV archive has zlib whole)
 	# The run harness reads frames back through Dawn's C++ header, which Dawn's
 	# build generates: it has to exist before those units compile
-	if(TARGET cos_pc AND TARGET webgpu_dawn)
-		add_dependencies(cos_pc webgpu_dawn)
+	if(TARGET cos_pc AND TARGET dawn::dawncpp_headers)
+		target_link_libraries(cos_pc PRIVATE dawn::dawncpp_headers)
 	endif()
 	if(TARGET cos_dsp_hle AND TARGET ZLIB::ZLIB)
 		target_link_libraries(cos_dsp_hle PRIVATE ZLIB::ZLIB)
@@ -122,3 +142,8 @@ set(CMAKE_CXX_LINK_EXECUTABLE
 # (the start-up constructor in the platform archive has no caller: hence whole.
 # objects.rsp is the game itself, in SwitchWaker's order: native/cmake/executable.cmake
 # hands it to the linker as an option, which this rule would otherwise drop)
+
+# Attach owned sources after upstream has created the game and renderer targets.
+include("${ps5}/cmake/game-features.cmake")
+include("${ps5}/cmake/aurora-extensions.cmake")
+include("${ps5}/cmake/link-inputs.cmake")

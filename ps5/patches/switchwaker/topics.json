@@ -1,0 +1,192 @@
+[
+  {
+    "name": "010-ps5-runtime.patch",
+    "purpose": "ps5 runtime",
+    "paths": [
+      "game/src/JSystem/JUtility/JUTGamePad.cpp",
+      "game/src/SSystem/SComponent/c_lib.cpp",
+      "game/src/SSystem/SComponent/c_math.cpp",
+      "game/src/f_pc/f_pc_method.cpp",
+      "native/include/pc/game_hooks.h",
+      "native/sdk/tests/sdk_threads.cpp",
+      "native/src/pc/features/pc_hd_textures.cpp",
+      "native/src/pc/harness/sweeps/pc_event_sweep.cpp",
+      "native/src/pc/harness/sweeps/pc_save_sweep.cpp",
+      "native/src/pc/pc_internal.h",
+      "native/src/pc/runtime/pc_crash.cpp",
+      "native/src/pc/runtime/pc_disc.cpp",
+      "native/src/pc/runtime/pc_frame.cpp",
+      "native/src/pc/runtime/pc_harness.cpp",
+      "native/src/pc/runtime/pc_main.cpp",
+      "native/src/pc/features/pc_language.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "PS5 integration; assess portable correctness fixes separately",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "020-ps5-presentation.patch",
+    "purpose": "ps5 presentation",
+    "paths": [
+      "native/include/pc/pc_settings.h",
+      "native/src/pc/features/pc_settings.cpp",
+      "native/src/pc/features/pc_precompile.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "PS5 presentation; retain upstream UI and settings storage",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "025-controller-ui.patch",
+    "purpose": "Archive-scoped controller texture and layout resource lookups; stock-resource validation and immutable asset lifetimes",
+    "paths": [
+      "game/src/JSystem/JKernel/JKRArchivePub.cpp",
+      "game/src/JSystem/JKernel/JKRArchivePri.cpp",
+      "game/src/JSystem/JKernel/JKRMemArchive.cpp",
+      "game/src/JSystem/JKernel/JKRDvdArchive.cpp",
+      "game/src/JSystem/JKernel/JKRAramArchive.cpp",
+      "game/src/JSystem/JKernel/JKRCompArchive.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "PS5-only resource integration; implementation and assets owned outside vendor",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "030-gameplay-controls.patch",
+    "purpose": "gameplay controls",
+    "paths": [
+      "game/include/d/actor/d_a_player_main.h",
+      "game/include/d/d_camera.h",
+      "game/src/d/actor/d_a_agbsw0.cpp",
+      "game/src/d/actor/d_a_himo2.cpp",
+      "game/src/d/actor/d_a_obj_ftree.cpp",
+      "game/src/d/actor/d_a_obj_movebox.cpp",
+      "game/src/d/actor/d_a_player_bottle.inc",
+      "game/src/d/actor/d_a_player_climb.inc",
+      "game/src/d/actor/d_a_player_crawl.inc",
+      "game/src/d/actor/d_a_player_dproc.inc",
+      "game/src/d/actor/d_a_player_hang.inc",
+      "game/src/d/actor/d_a_player_ladder.inc",
+      "game/src/d/actor/d_a_player_main.cpp",
+      "game/src/d/actor/d_a_player_particle.inc",
+      "game/src/d/actor/d_a_player_pushpull.inc",
+      "game/src/d/actor/d_a_player_rope.inc",
+      "game/src/d/actor/d_a_player_tact.inc",
+      "game/src/d/actor/d_a_player_whide.inc",
+      "game/src/d/actor/d_a_ship.cpp",
+      "game/src/d/d_camera.cpp",
+      "game/src/d/d_map.cpp",
+      "game/src/d/d_menu_dmap.cpp",
+      "game/src/d/d_ovlp_fade.cpp",
+      "game/src/d/d_s_open.cpp",
+      "game/src/d/d_save.cpp",
+      "game/src/d/d_stage.cpp",
+      "game/src/f_op/f_op_scene_req.cpp",
+      "game/src/m_Do/m_Do_controller_pad.cpp",
+      "native/src/pc/features/pc_qol.cpp",
+      "native/src/pc/features/pc_gyro.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "035-message-hud.patch",
+    "purpose": "Message decoding, fast-text controls and disc-specific HUD resources",
+    "paths": [
+      "game/src/d/d_mesg.cpp",
+      "game/src/d/d_meter.cpp",
+      "game/src/d/d_msg.cpp",
+      "game/src/f_op/f_op_msg_mng.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "Native game integration; preserve upstream regional builds",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "040-picto-capture.patch",
+    "purpose": "picto capture",
+    "paths": [
+      "game/src/d/d_picture_box.cpp",
+      "game/src/d/d_snap.cpp",
+      "native/src/pc/game_hooks/pc_capture.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "050-world-rendering.patch",
+    "purpose": "world rendering",
+    "paths": [
+      "game/src/d/actor/d_a_lod_bg.cpp",
+      "game/src/m_Do/m_Do_graphic.cpp",
+      "native/src/pc/game_hooks/pc_fps60_camera.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "060-runtime-region.patch",
+    "purpose": "PAL-first native core with explicit US disc asset, layout, text and save compatibility",
+    "paths": [
+      "game/include/d/d_message_paper.h",
+      "game/include/global.h",
+      "game/src/d/actor/d_a_agb.cpp",
+      "game/src/d/actor/d_a_mgameboard.cpp",
+      "game/src/d/actor/d_a_title.cpp",
+      "game/src/d/d_2dnumber.cpp",
+      "game/src/d/d_message_paper.cpp",
+      "game/src/d/d_minigame_starter.cpp",
+      "game/src/d/d_minigame_terminater.cpp",
+      "game/src/d/d_place_name.cpp",
+      "game/src/d/d_s_logo.cpp",
+      "game/src/d/d_s_title.cpp",
+      "game/src/d/d_scope.cpp",
+      "game/src/m_Do/m_Do_MemCardRWmng.cpp",
+      "game/src/m_Do/m_Do_gba_com.cpp",
+      "native/include/pc/pc_game_id.h",
+      "native/src/pc/runtime/pc_assets.cpp"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "Native runtime-region support; retain reference regional compilation",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "065-region-menus.patch",
+    "purpose": "Disc-compatible title, name-entry and save menus, including controller-resource integration",
+    "paths": [
+      "game/include/d/d_name.h",
+      "game/src/d/d_file_error.cpp",
+      "game/src/d/d_menu_fmap.cpp",
+      "game/src/d/d_menu_fmap2.cpp",
+      "game/src/d/d_menu_save.cpp",
+      "game/src/d/d_name.cpp",
+      "game/src/d/d_s_menu.cpp",
+      "game/src/d/d_s_name.cpp",
+      "game/src/pal/d/d_file_select.inc"
+    ],
+    "base": "parent index gitlink",
+    "upstreamability": "Native game integration; preserve upstream regional builds",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  }
+]

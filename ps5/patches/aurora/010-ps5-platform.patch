@@ -1,0 +1,223 @@
+diff --git a/lib/aurora.cpp b/lib/aurora.cpp
+index 4b30763..bce2cc0 100644
+--- a/lib/aurora.cpp
++++ b/lib/aurora.cpp
+@@ -29,6 +29,7 @@
+ #include <SDL3/SDL_filesystem.h>
+ #include <magic_enum.hpp>
+ 
++#include <atomic>
+ #include <chrono>
+ #include <thread>
+ 
+@@ -240,7 +241,8 @@ const AuroraEvent* update() noexcept {
+ }
+ 
+ #ifdef AURORA_ENABLE_GX
+-void present_frame(imgui::DrawData imguiDrawData) noexcept;
++static std::atomic_bool g_presentSuppressed{false};
++void present_frame(imgui::DrawData imguiDrawData, bool suppressed) noexcept;
+ 
+ // A gfx frame is being recorded. Written by whichever thread begins and ends frames: the game thread, or
+ // the GX FIFO worker with the async end of frame (fifo::set_async_end_frame syncs in between), so a frame
+@@ -299,18 +301,19 @@ void end_frame() noexcept {
+   ZoneScoped;
+ #ifdef AURORA_ENABLE_GX
+   auto imguiDrawData = imgui::freeze();
++  const bool suppressed = g_presentSuppressed.load(std::memory_order_relaxed);
+   if (gx::fifo::async_end_frame()) {
+     // Async end of frame (patch 0018): what needs the frame's commands processed (the texture caches, the
+     // last render pass, the frame handed to the render worker) runs on the GX FIFO worker once it gets
+     // there; the game thread goes on (fifo.hpp).
+-    gx::fifo::end_frame_async([imguiDrawData = std::move(imguiDrawData)]() mutable {
++    gx::fifo::end_frame_async([imguiDrawData = std::move(imguiDrawData), suppressed]() mutable {
+       if (!g_frameBegun) {
+         return;
+       }
+       g_frameBegun = false;
+       gx::texture::end_frame();
+       gfx::finish();
+-      present_frame(std::move(imguiDrawData));
++      present_frame(std::move(imguiDrawData), suppressed);
+     });
+     return;
+   }
+@@ -319,14 +322,14 @@ void end_frame() noexcept {
+   gx::texture::end_frame();
+   gfx::finish();
+   g_frameBegun = false;
+-  present_frame(std::move(imguiDrawData));
++  present_frame(std::move(imguiDrawData), suppressed);
+ #endif
+ }
+ 
+ #ifdef AURORA_ENABLE_GX
+ // The frame's present: hands the recorded frame to the render worker. After gfx::finish, on the thread
+ // that ended the frame (the GX FIFO worker with the async end of frame).
+-void present_frame(imgui::DrawData imguiDrawData) noexcept {
++void present_frame(imgui::DrawData imguiDrawData, bool suppressed) noexcept {
+   ZoneScoped;
+   const auto& presentSource = webgpu::present_source();
+   const auto viewport = webgpu::calculate_present_viewport(webgpu::g_graphicsConfig.surfaceConfiguration.width,
+@@ -344,14 +347,14 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+ #endif
+ 
+   gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
+-                  imguiDrawData = std::move(imguiDrawData)](
++                  imguiDrawData = std::move(imguiDrawData), suppressed](
+                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
+     wgpu::Texture currentTexture;
+     wgpu::TextureView currentView;
+     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
+     {
+       window::SurfaceLock surfaceLock;
+-      if (window::is_presentable() && g_surface) {
++      if (!suppressed && window::is_presentable() && g_surface) {
+         ZoneScopedN("Acquire texture");
+         wgpu::SurfaceTexture surfaceTexture;
+         g_surface.GetCurrentTexture(&surfaceTexture);
+@@ -421,7 +424,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+         imgui::render(pass, imguiDrawData);
+         pass.End();
+       }
+-    } else {
++    } else if (!suppressed) {
+       Log.info("Skipping present; window not presentable");
+     }
+     webgpu::gpu_prof::frame_end(encoder);
+@@ -447,7 +450,9 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+         Log.warn("Surface present failed");
+         webgpu::release_surface();
+       }
+-    } else if (g_surface) {
++    } else if (g_surface && !suppressed) {
++      // No surface acquisition was attempted during a covered loading frame.
++      // Its default Error status must not drop the healthy swapchain.
+       switch (surfaceStatus) {
+       case wgpu::SurfaceGetCurrentTextureStatus::Timeout:
+         Log.warn("Surface texture acquisition timed out");
+@@ -511,6 +516,13 @@ void aurora_shutdown() { aurora::shutdown(); }
+ const AuroraEvent* aurora_update() { return aurora::update(); }
+ bool aurora_begin_frame() { return aurora::begin_frame(); }
+ void aurora_end_frame() { aurora::end_frame(); }
++void aurora_set_present_suppressed(bool suppressed) {
++#ifdef AURORA_ENABLE_GX
++  aurora::g_presentSuppressed.store(suppressed, std::memory_order_relaxed);
++#else
++  (void)suppressed;
++#endif
++}
+ void aurora_set_async_end_frame(bool enabled) {
+ #ifdef AURORA_ENABLE_GX
+   aurora::gx::fifo::set_async_end_frame(enabled);
+diff --git a/lib/card/CardGciFolder.cpp b/lib/card/CardGciFolder.cpp
+index 00ff828..2a3809b 100644
+--- a/lib/card/CardGciFolder.cpp
++++ b/lib/card/CardGciFolder.cpp
+@@ -2,6 +2,10 @@
+ 
+ #include <algorithm>
+ #include <cstring>
++#if defined(__PROSPERO__)
++#include <cerrno>
++#include <sys/stat.h>
++#endif
+ 
+ #include <SDL3/SDL_filesystem.h>
+ 
+@@ -16,6 +20,21 @@ namespace aurora::card {
+ namespace {
+ Module Log("aurora::card");
+ 
++void allow_ftp_access(const std::filesystem::path& cardPath) {
++#if defined(__PROSPERO__)
++  // SDL creates directories as 0770. The console's FTP server may run under
++  // another user/group, so repair both the region and card directory on open.
++  for (const auto& path : {cardPath.parent_path(), cardPath}) {
++    if (!path.empty() && chmod(path.c_str(), 0777) != 0) {
++      Log.warn("Cannot make save directory '{}' FTP-accessible: {}", io::fs_path_to_string(path),
++               std::strerror(errno));
++    }
++  }
++#else
++  (void)cardPath;
++#endif
++}
++
+ ECardResult check_new_path(const std::filesystem::path& path) {
+   std::error_code ec;
+   const auto status = std::filesystem::symlink_status(path, ec);
+@@ -488,6 +507,7 @@ ECardResult CardGciFolder::format(ECardSlot deviceId, ECardSize size, EEncoding
+   if (m_folderPath.empty() || !io::create_directories(m_folderPath)) {
+     return ECardResult::IOERROR;
+   }
++  allow_ftp_access(m_folderPath);
+   return m_error = ECardResult::READY;
+ }
+ 
+@@ -531,6 +551,7 @@ bool CardGciFolder::open(const std::filesystem::path& filepath) {
+     return false;
+   }
+ 
++  allow_ftp_access(filepath);
+   m_error = ECardResult::IOERROR;
+   std::filesystem::directory_iterator it{filepath, ec};
+   if (ec) {
+diff --git a/lib/dawn/BackendBinding.cpp b/lib/dawn/BackendBinding.cpp
+index 447ead8..8ce4942 100644
+--- a/lib/dawn/BackendBinding.cpp
++++ b/lib/dawn/BackendBinding.cpp
+@@ -28,6 +28,13 @@ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptor(SDL_Wind
+   desc->hwnd = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+   desc->hinstance = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, nullptr);
+   return std::move(desc);
++#elif defined(__PROSPERO__)
++  // PlayStation 5: one output and no window. Dawn's PS5 port takes the Switch's
++  // native-window descriptor for it (VK_KHR_display underneath); any token will do.
++  static int output;
++  std::shared_ptr<wgpu::SurfaceSourceSwitchNWindow> desc = std::make_shared<wgpu::SurfaceSourceSwitchNWindow>();
++  desc->window = &output;
++  return std::move(desc);
+ #elif defined(SDL_PLATFORM_LINUX)
+   const char* driver = SDL_GetCurrentVideoDriver();
+   if (SDL_strcmp(driver, "wayland") == 0) {
+diff --git a/lib/dolphin/pad/pad.cpp b/lib/dolphin/pad/pad.cpp
+index ffc16fa..dcce233 100644
+--- a/lib/dolphin/pad/pad.cpp
++++ b/lib/dolphin/pad/pad.cpp
+@@ -96,10 +96,12 @@ std::array<PADButtonMapping, PAD_BUTTON_COUNT> g_defaultButtonsPS4{{
+     {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, PAD_BUTTON_RIGHT},
+ }};
+ 
++// PS5 port: by position, as the GameCube pad has them around A: B to its left (Square), X to its
++// right (Circle), Y above (Triangle). The controller UI archives use the same face-button mapping.
+ std::array<PADButtonMapping, PAD_BUTTON_COUNT> g_defaultButtonsPS5{{
+     {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_A},
+-    {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_B},
+-    {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_X},
++    {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_B},
++    {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_X},
+     {SDL_GAMEPAD_BUTTON_NORTH, PAD_BUTTON_Y},
+     {SDL_GAMEPAD_BUTTON_START, PAD_BUTTON_START},
+     {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_TRIGGER_Z},
+diff --git a/lib/imgui.cpp b/lib/imgui.cpp
+index 07a0ec1..908adf5 100644
+--- a/lib/imgui.cpp
++++ b/lib/imgui.cpp
+@@ -236,9 +236,16 @@ void render(const wgpu::RenderPassEncoder& pass, const DrawData& drawData) noexc
+     ImGui_ImplSDLRenderer3_RenderDrawData(data, renderer);
+     SDL_RenderPresent(renderer);
+   } else {
++#if defined(__PROSPERO__)
++    // PS5 port: no debug group. Some builds of the title died here at the first frame with
++    // anything to draw (a check in Dawn's AddNullTerminatedString, under PushDebugGroup); the
++    // group only labels the pass for a GPU debugger, which the console has none of.
++    ImGui_ImplWGPU_RenderDrawData(data, pass.Get());
++#else
+     pass.PushDebugGroup("Aurora: Dear Imgui");
+     ImGui_ImplWGPU_RenderDrawData(data, pass.Get());
+     pass.PopDebugGroup();
++#endif
+   }
+ }
+ 

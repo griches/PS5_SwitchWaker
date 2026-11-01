@@ -19,6 +19,9 @@ case " $* " in
 *" -c "*) ;;
 *) exec "$@" ;;
 esac
+# Keep these after dependency flags (notably Abseil's -Wconversion). CMake
+# de-duplicates repeated options, which can otherwise move suppressions earlier.
+set -- "$@" -Wno-null-conversion -Wno-null-arithmetic -Wno-undefined-inline -Wno-implicit-int-conversion -Wno-deprecated-enum-compare-conditional
 jobs=$("$@" '-###' 2>&1 | grep -- '^ *"') || exec "$@"
 # one job, the compiler proper: a .S file is two (the preprocessor, then the assembler)
 [ "$(printf '%s\n' "$jobs" | wc -l)" -eq 1 ] || exec "$@"
