@@ -1,0 +1,325 @@
+diff --git a/game/src/d/d_picture_box.cpp b/game/src/d/d_picture_box.cpp
+index 12a4faa5..503f1aef 100644
+--- a/game/src/d/d_picture_box.cpp
++++ b/game/src/d/d_picture_box.cpp
+@@ -6,6 +6,10 @@
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #if TARGET_PC
+ #include "pc/pc_aspect.h"
++#if defined(__PROSPERO__)
++#include "pc/pc_ui_assets.h"
++#endif
++#include "pc/pc_picto_geometry.h"
+ #endif
+ #include "d/d_picture_box.h"
+ #include "d/d_s_play.h"
+@@ -53,9 +57,8 @@ void dPb_erasePicture() {
+         dComIfGs_setEventReg(dSv_event_flag_c::UNK_89FF, evReg2);
+         dComIfGp_setItemPictureNumCount(-1);
+     }
+-    // !@bug: This function does not set the picture flags, meaning the removing pictures are never cleared from the memcard.
+-    // This was fixed for PAL.
+-#if VERSION >= VERSION_PAL
++    // Persist photo deletion for both supported discs; PAL fixed the original US bug.
++#if COS_RUNTIME_REGION || (VERSION >= VERSION_PAL) || defined(__PROSPERO__)
+     dComIfGp_onPictureFlag(0);
+     dComIfGp_onPictureFlag(1);
+     dComIfGp_onPictureFlag(2);
+@@ -152,15 +155,47 @@ void dJle_Pb_c::screenSet() {
+ 
+     shutterHide();
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    // Zoom uses the left stick. Keep its letter upright; the separate arrows
++    // indicate direction. Replace both textures used by the prompt animation.
++    fopMsgM_pane_class* zoomPanes[] = {&pane_crtn, &pane_czom};
++    for (auto* pane : zoomPanes) {
++        auto* picture = static_cast<J2DPicture*>(pane->pane);
++        picture->changeTexture("font_07_01.bti", 0);
++        // Remove the original C-stick tint without changing the pane's fade.
++        picture->setBlackWhite(JUtility::TColor(0), JUtility::TColor(0xffffffff));
++        picture->setCornerColor(JUtility::TColor(0xffffffff));
++        fopMsgM_blendInit(pane, "font_07_02.bti");
++        picture->rotate(pane->mSizeOrig.x / 2.0f, pane->mSizeOrig.y / 2.0f, ROTATE_Z, 0.0f);
++    }
++#else
+     fopMsgM_blendInit(&pane_crtn,"font_09_02.bti");
+     fopMsgM_blendInit(&pane_czom,"font_09_02.bti");
+     
+     pane_czom.pane->rotate(pane_czom.mSizeOrig.x / 2.0f, pane_czom.mSizeOrig.y / 2.0f, ROTATE_Z, 180.0f);
++#endif
+ 
+     fopMsgM_blendInit(&pane_ylig, "cursor_00_02.bti");
+     fopMsgM_blendInit(&pane_ylef, "cursor_00_02.bti");
+     fopMsgM_blendInit(&pane_yrtn, "cursor_00_02.bti");
+     fopMsgM_blendInit(&pane_yzom, "cursor_00_02.bti");
++#if TARGET_PC && defined(__PROSPERO__)
++    // Use the generated arrow with neutral colours; retain the zoom animation.
++    fopMsgM_pane_class* zoomArrows[] = {&pane_yrtn, &pane_yzom};
++    for (auto* pane : zoomArrows) {
++        auto* picture = static_cast<J2DPicture*>(pane->pane);
++        if (auto* arrow = static_cast<ResTIMG*>(pc_ui_assets_zoom_arrow())) {
++            picture->changeTexture(arrow, 0);
++            picture->changeTexture(arrow, 1);
++            picture->setMirror(static_cast<J2DMirror>(0));
++            picture->setBlackWhite(JUtility::TColor(0), JUtility::TColor(0xffffffff));
++            picture->setCornerColor(JUtility::TColor(0xffffffff));
++            picture->rotate(pane->mSizeOrig.x / 2.0f, pane->mSizeOrig.y / 2.0f,
++                            ROTATE_Z, pane == &pane_yrtn ? 180.0f : 0.0f);
++        }
++    }
++#endif
++
+ }
+ 
+ /* 80225E88-8022616C       .text screenSet2__9dJle_Pb_cFv */
+@@ -173,6 +208,24 @@ void dJle_Pb_c::screenSet2() {
+     fopMsgM_setPaneData(&pane_tx[2], scrn2->search('tx80'));
+     fopMsgM_setPaneData(&pane_tx[3], scrn2->search('tx81'));
+ 
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++    if(dComIfGs_getOptRuby()) {
++        pane_tx[0].pane->move(pane_tx[0].pane->getBounds().i.x, pane_tx[0].pane->getBounds().i.y - 4.0f);
++        pane_tx[2].pane->move(pane_tx[2].pane->getBounds().i.x, pane_tx[2].pane->getBounds().i.y - 4.0f);
++    }
++}
++else {
++    if(dComIfGs_getOptRuby()) {
++        pane_tx[0].pane->move(pane_tx[0].pane->getBounds().i.x, pane_tx[0].pane->getBounds().i.y - 14.0f);
++        pane_tx[2].pane->move(pane_tx[2].pane->getBounds().i.x, pane_tx[2].pane->getBounds().i.y - 14.0f);
++    }
++    else {
++        pane_tx[0].pane->move(pane_tx[0].pane->getBounds().i.x, pane_tx[0].pane->getBounds().i.y - 10.0f);
++        pane_tx[2].pane->move(pane_tx[2].pane->getBounds().i.x, pane_tx[2].pane->getBounds().i.y - 10.0f);
++    }
++}
++#else
+ #if VERSION < VERSION_PAL
+     if(dComIfGs_getOptRuby()) {
+         pane_tx[0].pane->move(pane_tx[0].pane->getBounds().i.x, pane_tx[0].pane->getBounds().i.y - 4.0f);
+@@ -187,6 +240,7 @@ void dJle_Pb_c::screenSet2() {
+         pane_tx[0].pane->move(pane_tx[0].pane->getBounds().i.x, pane_tx[0].pane->getBounds().i.y - 10.0f);
+         pane_tx[2].pane->move(pane_tx[2].pane->getBounds().i.x, pane_tx[2].pane->getBounds().i.y - 10.0f);
+     }
++#endif
+ #endif
+ 
+     pane_tx[1].pane->move(pane_tx[1].pane->getBounds().i.x, pane_tx[1].pane->getBounds().i.y - 3.0f);
+@@ -738,9 +792,10 @@ void dJle_Pb_c::pictureDraw(u8 mono_color_1_alpha, int img_index) {
+     GXGetScissor(&left, &top, &width, &height);
+ 
+ #if TARGET_PC
+-    // Widescreen (pc_aspect.h): the photo keeps its 4:3 shape in a narrower viewport, centred
+-    // (16:9 code at 0x80227A18-20: x 79, width 480).
+-    GXSetViewport(pc_aspect_lerp(0.0f, 79.0f), 0.0f, pc_aspect_lerp(640.0f, 480.0f), 480.0f, 0.0f, 1.0f);
++    // Match the photo's -9..650 projection to the frame's widened 2D layout.
++    // BlueWake's calculated mapping also keeps the side photos aligned.
++    const auto photoViewport = pc::picto::gallery(pc_aspect_2d_left(), pc_aspect_2d_right());
++    GXSetViewport(photoViewport.x, 0.0f, photoViewport.width, 480.0f, 0.0f, 1.0f);
+ #else
+     GXSetViewport(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 1.0f);
+ #endif
+@@ -2241,6 +2296,16 @@ void dJle_Pb_c::draw() {
+     }
+ 
+     J2DOrthoGraph* graph = dComIfGp_getCurrentGrafPort();
++#if TARGET_PC
++    // Match the viewfinder/confirmation frame to the corrected photo crop.
++    // Gallery frames retain the shared widened layout used by pictureDraw.
++    J2DOrthoGraph cameraGraph(0.0f, 0.0f, 640.0f, 480.0f, -1.0f, 1.0f);
++    if (mViewMode == PB_VIEW_CAMERA_e && pc_aspect_wide()) {
++        const auto bounds = pc::picto::viewfinder(pc_aspect_ratio());
++        cameraGraph.setOrtho(bounds.x, -21.0f, bounds.width, 524.0f, -1.0f, 1.0f);
++        graph = &cameraGraph;
++    }
++#endif
+     graph->setPort();
+ 
+     if (mModeSwapActive == 0) {
+@@ -2269,7 +2334,7 @@ void dJle_Pb_c::draw() {
+             }
+         }
+ 
+-        dComIfGp_getCurrentGrafPort()->setPort();
++        graph->setPort();
+ 
+         for (int idx = 0; idx < 15; idx++) {
+             if (idx == mChoiceArrowIconIdx) {
+@@ -2330,7 +2395,6 @@ void dJle_Pb_c::draw() {
+             }
+         }
+ 
+-        graph = dComIfGp_getCurrentGrafPort();
+         graph->setPort();
+ 
+         for (int idx = 0; idx < 15; idx++) {
+@@ -2381,6 +2445,8 @@ void dJle_Pb_c::draw() {
+         J2DFillBox(-130.0f, -32.0f, 130.0f, 640.0f, JUtility::TColor(0x000000FF));
+         J2DFillBox(640.0f, -32.0f, 130.0f, 640.0f, JUtility::TColor(0x000000FF));
+     }
++    // Do not leak the camera-only projection to subsequent HUD draws.
++    dComIfGp_getCurrentGrafPort()->setPort();
+ #endif
+ }
+ 
+diff --git a/game/src/d/d_snap.cpp b/game/src/d/d_snap.cpp
+index ceb97228..3b050d3c 100644
+--- a/game/src/d/d_snap.cpp
++++ b/game/src/d/d_snap.cpp
+@@ -14,6 +14,8 @@
+ #include "weak_bss_3569.h" // IWYU pragma: keep
+ #if TARGET_PC
+ #include "pc/game_hooks.h"
++#include "pc/pc_aspect.h"
++#include "pc/pc_picto_geometry.h"
+ #endif
+ 
+ int (dSnap_packet::*dSnap_packet::m_judge_tbl[])() = {
+@@ -1949,10 +1951,16 @@ void dSnap_packet::Judge() {
+         return;
+     }
+     mResult = 0;
++#if TARGET_PC
++    mResultDetail = 0; // a failed/deferred read must not retain the previous shot
++#endif
+     GXDrawDone();
+     GXPokeAlphaRead(GX_READ_NONE);
+     for (int col = 0; col < (s32)ARRAY_SIZE(m_tbl); col++) {
+         m_tbl[col].m_obj.mCapturedPixels = 0;
++#if TARGET_PC
++        m_tbl[col].m_obj.mCapturedRatio = 0.0f;
++#endif
+         m_tbl[col].m_obj.SetAreaClear();
+     }
+ #if TARGET_PC
+@@ -1960,15 +1968,24 @@ void dSnap_packet::Judge() {
+     // objects' alpha just drawn, is copied here and read back after the frame; PcJudgePixels then
+     // does the GameCube's peeks on the copy and sets the result. The picture box reads the result
+     // only when the photo is saved, frames later.
+-    pc_efb_peek_request(DSNAP_SHUTTER_LEFT, DSNAP_SHUTTER_TOP, DSNAP_SHUTTER_RIGHT - DSNAP_SHUTTER_LEFT,
++    const auto shutter = pc::picto::sourceSpan(DSNAP_SHUTTER_LEFT,
++        DSNAP_SHUTTER_RIGHT - DSNAP_SHUTTER_LEFT, pc_aspect_ratio());
++    pc_efb_peek_request(shutter.left, DSNAP_SHUTTER_TOP, shutter.width,
+                         DSNAP_SHUTTER_BOTTOM - DSNAP_SHUTTER_TOP, dSnap_PcJudgeDone);
+     mFlag &= ~1;
+ }
+ 
+ void dSnap_packet::PcJudgePixels() {
++#endif
++#if TARGET_PC
++    const auto shutter = pc::picto::sourceSpan(DSNAP_SHUTTER_LEFT,
++        DSNAP_SHUTTER_RIGHT - DSNAP_SHUTTER_LEFT, pc_aspect_ratio());
++    const int shutterLeft = shutter.left, shutterRight = shutter.left + shutter.width;
++#else
++    const int shutterLeft = DSNAP_SHUTTER_LEFT, shutterRight = DSNAP_SHUTTER_RIGHT;
+ #endif
+     for (int y = DSNAP_SHUTTER_TOP; y < DSNAP_SHUTTER_BOTTOM; y++) {
+-        for (int x = DSNAP_SHUTTER_LEFT; x < DSNAP_SHUTTER_RIGHT; x++) {
++        for (int x = shutterLeft; x < shutterRight; x++) {
+             u32 sp8;
+ #if TARGET_PC
+             sp8 = pc_efb_peek_argb(x, y);
+@@ -1976,7 +1993,12 @@ void dSnap_packet::PcJudgePixels() {
+             GXPeekARGB(x, y, &sp8);
+ #endif
+             int r0 = sp8 >> 26;
++#if TARGET_PC
++            // Ignore clear alpha and any ID not registered for this photograph.
++            if (!pc::picto::actorSlot(sp8, field_0x14)) {
++#else
+             if (r0 >= 0x3F) {
++#endif
+                 continue;
+             }
+             m_tbl[r0].m_obj.mCapturedPixels++;
+@@ -1992,6 +2014,10 @@ void dSnap_packet::PcJudgePixels() {
+             continue;
+         }
+         m_tbl[col].m_obj.mCapturedRatio = m_tbl[col].m_obj.mCapturedPixels / area;
++#if TARGET_PC
++        m_tbl[col].m_obj.mCapturedPixels = pc::picto::originalPixels(
++            m_tbl[col].m_obj.mCapturedPixels, pc_aspect_ratio());
++#endif
+     }
+     SetResult();
+ #if TARGET_PC
+diff --git a/native/src/pc/game_hooks/pc_capture.cpp b/native/src/pc/game_hooks/pc_capture.cpp
+index f69fa4df..c82755a8 100644
+--- a/native/src/pc/game_hooks/pc_capture.cpp
++++ b/native/src/pc/game_hooks/pc_capture.cpp
+@@ -18,6 +18,7 @@
+ // leaves mid grey, so the encoder never sees an out-of-range buffer.
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #include "pc/game_hooks.h"
++#include "pc/pc_picto_readback.h"
+ #include "pc_internal.h"
+ 
+ #include "d/d_snap.h"
+@@ -33,6 +34,7 @@
+ 
+ #include <algorithm>
+ #include <cstring>
++#include <memory>
+ #include <unistd.h>
+ #include <vector>
+ 
+@@ -80,6 +82,14 @@ bool readTexture(const aurora::gfx::TextureHandle& handle, std::vector<uint8_t>&
+         return true;
+     }
+ #endif
++    // A copy texture without CopySrc is not a Vulkan transfer source. CopyTextureToBuffer then
++    // loses the device, and Aurora's uncaptured-error callback aborts (the picto box returns to
++    // the home menu). Skip the readback: writeGx leaves mid grey, which encode_s3tc accepts.
++    const auto copyUsage = static_cast<uint64_t>(handle->texture.GetUsage());
++    if ((copyUsage & static_cast<uint64_t>(wgpu::TextureUsage::CopySrc)) == 0) {
++        pc::writef(STDERR_FILENO, "[cos] capture: copy texture has no CopySrc usage; readback skipped\n");
++        return false;
++    }
+     const uint32_t width = handle->size.width;
+     const uint32_t height = handle->size.height;
+     const uint32_t bytesPerRow = (width * 4 + 255) & ~255u;
+@@ -107,12 +117,14 @@ bool readTexture(const aurora::gfx::TextureHandle& handle, std::vector<uint8_t>&
+     const wgpu::CommandBuffer commands = encoder.Finish();
+     gpu::g_queue.Submit(1, &commands);
+ 
+-    bool mapped = false;
++    // WaitAny can time out while the callback is still pending. Its state must
++    // outlive this stack frame, including on readback failure/device loss.
++    const auto mapped = std::make_shared<bool>(false);
+     const wgpu::Future future = buffer.MapAsync(
+         wgpu::MapMode::Read, 0, size, wgpu::CallbackMode::WaitAnyOnly,
+-        [&mapped](wgpu::MapAsyncStatus status, wgpu::StringView) { mapped = status == wgpu::MapAsyncStatus::Success; });
++        [mapped](wgpu::MapAsyncStatus status, wgpu::StringView) { *mapped = status == wgpu::MapAsyncStatus::Success; });
+     const wgpu::WaitStatus wait = gpu::g_instance.WaitAny(future, 5'000'000'000ull);
+-    if (wait != wgpu::WaitStatus::Success || !mapped) {
++    if (wait != wgpu::WaitStatus::Success || !*mapped) {
+         pc::writef(STDERR_FILENO, "[cos] capture: readback did not complete (wait %u)\n", (unsigned int)wait);
+         return false;
+     }
+@@ -268,6 +280,8 @@ void peekReadBack() {
+     }
+     void (*done)() = sPeekDone;
+     sPeekDone = nullptr;
++    sPeekValid = false;
++    sPeek.clear();
+     sPeekValid = readCopy(sPeekKey, "efb-peek", sPeek, sPeekSrcWidth, sPeekSrcHeight);
+     done();
+     sPeekValid = false;
+@@ -292,14 +306,8 @@ void pc_efb_peek_request(u16 left, u16 top, u16 width, u16 height, void (*done)(
+ }
+ 
+ u32 pc_efb_peek_argb(u16 x, u16 y) {
+-    if (!sPeekValid || x < sPeekLeft || y < sPeekTop || x >= sPeekLeft + sPeekWidth || y >= sPeekTop + sPeekHeight) {
+-        return 0xFFFFFFFF;
+-    }
+-    // The texel under the centre of the logical pixel.
+-    const uint32_t sx = ((uint32_t)(x - sPeekLeft) * 2 + 1) * sPeekSrcWidth / (2u * sPeekWidth);
+-    const uint32_t sy = ((uint32_t)(y - sPeekTop) * 2 + 1) * sPeekSrcHeight / (2u * sPeekHeight);
+-    const uint8_t* p = sPeek.data() + ((size_t)sy * sPeekSrcWidth + sx) * 4;
+-    return (u32)p[3] << 24 | (u32)p[0] << 16 | (u32)p[1] << 8 | p[2];
++    return pc::picto::peekArgb(sPeekValid, sPeek, sPeekSrcWidth, sPeekSrcHeight,
++        sPeekLeft, sPeekTop, sPeekWidth, sPeekHeight, x, y);
+ }
+ 
+ void pc_snap_judged(int count, const dSnap_RegistObjElm* table, int result) {
