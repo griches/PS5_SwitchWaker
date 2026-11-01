@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Wind Waker for the PlayStation 5 - pack the built title folder as a release archive.
 #
-#   ps5/tools/package-release.sh VERSION      (through tools/vm.sh package-release 1.0.0)
+#   ps5/tools/package-release.sh
 #
-# Writes dist/WindWaker-PS5-vVERSION.zip: the title folder dist/<TITLE_ID>/ as the
+# Writes dist/ProsperoWake-build-N.zip: the title folder dist/<TITLE_ID>/ as the
 # console takes it (eboot.bin, sce_sys/, sce_module/, res/, licenses/), with
 # SOURCE.txt beside eboot.bin naming the revision of every part the build
 # linked. A built title is under GPL-3.0: that file is how a release says where
@@ -13,15 +13,13 @@
 # After PS5_Dusklight's package-release.sh.
 # SPDX-License-Identifier: MIT
 set -euo pipefail
-version=${1:?usage: package-release.sh VERSION}
 ps5=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 root=$(dirname "$ps5")
-vulkan=$(cd -- "${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}" && pwd)
-upstream="$root/vendor/switchwaker"
+[[ $# == 0 ]] || { echo "usage: package-release.sh (uses the packaged build number)" >&2; exit 2; }
 title_id=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["titleId"])' "$ps5/sce_sys/param.json")
 app="$root/dist/$title_id"
-for file in eboot.bin initial_pipeline_cache.db sce_sys/param.json sce_sys/icon0.png sce_sys/pic0.dds \
-    sce_sys/pic1.dds sce_module/libc.prx res/ps5-glyphs res/shader-cache/dawn_cache.db; do
+for file in BUILD_INPUTS.json eboot.bin initial_pipeline_cache.db sce_sys/param.json sce_sys/icon0.png sce_sys/pic0.dds \
+    sce_sys/pic1.dds sce_module/libc.prx res/shader-cache/dawn_cache.db; do
     [[ -e $app/$file ]] || { echo "missing $app/$file: run build.sh first" >&2; exit 2; }
 done
 # the caches the title ships are under res/; a console's own, a save or a pack are not for a release
@@ -31,62 +29,59 @@ stray=$(find "$app" \( -iname '*.iso' -o -iname '*.ciso' -o -iname '*.gcm' -o -i
 # the submodule's working tree carries the console's patches: that is not a change here
 [[ -z $(git -C "$root" status --porcelain --ignore-submodules=dirty) ]] ||
     { echo "uncommitted changes: a release is built from a commit" >&2; exit 2; }
-provenance="$vulkan/.deps/native/radv-release/PROVENANCE.txt"
-versions="$root/.deps/aurora/cmake/AuroraDependencyVersions.cmake"
 mkdir -p "$app/licenses"
 cp "$root/licenses/GPL-3.0.txt" "$root/licenses/MIT.txt" "$root/licenses/Zlib.txt" "$app/licenses/"
 cp "$root/LICENSING.md" "$app/licenses/LICENSING.md"
-cat > "$app/SOURCE.txt" <<SOURCE
-Wind Waker for PlayStation 5, version $version
-An unofficial homebrew port. Not affiliated with the SwitchWaker project, Nintendo
-or Sony Interactive Entertainment.
+# Describe the packaged binary, not whichever checkout happens to be current.
+build_number=$(python3 - "$app" <<'PYTHON'
+import hashlib
+import json
+import re
+from pathlib import Path
+import sys
 
-This title is distributed under the GNU General Public License, version 3
-(licenses/GPL-3.0.txt). Its source is these projects at these revisions:
-
-The port (patches, SDL3 drivers, disc reader, platform layer, build)
-  $(git -C "$root" remote get-url origin 2>/dev/null || echo "this repository")
-  $(git -C "$root" rev-parse HEAD)
-The game's code: SwitchWaker (MIT) and the decompilation it compiles (CC0-1.0),
-with ps5/patches/switchwaker.patch
-  https://github.com/centollOS/SwitchWaker
-  $(git -C "$upstream" rev-parse HEAD)
-Sound: Dolphin's DSP HLE (GPL-2.0-or-later), fetched by SwitchWaker's
-native/tools/fetch_recompcore.sh at the revision that script names
-The GameCube layer: Aurora (MIT), with SwitchWaker's patches and ps5/patches/aurora.patch
-  https://github.com/encounter/aurora
-  $(sed -n 's/^set(COS_AURORA_COMMIT "\([0-9a-f]\{40\}\)".*/\1/p' "$upstream/native/cmake/Aurora.cmake")
-WebGPU: Dawn (BSD-3-Clause), with ps5/patches/dawn.patch and dawn-abseil.patch
-  https://github.com/encounter/dawn
-  $(sed -n 's/^_aurora_dependency_version(AURORA_DAWN_REF "\([0-9a-f]\{40\}\)".*/\1/p' "$versions")
-SDL3 (Zlib), with ps5/patches/sdl.patch and the drivers in ps5/sdl
-  https://github.com/libsdl-org/SDL
-  $(sed -n 's/^_aurora_dependency_version(AURORA_SDL3_REF "refs\/tags\/\([^"]*\)".*/\1/p' "$versions")
-The Vulkan driver: RADV, from PS5_Mesa (MIT)
-  https://github.com/mihawk-99/PS5_Mesa
-  $(sed -n 's/^revision: //p' "$provenance")
-The link recipe, CRT, libc.prx and packaging: PS5_Vulkan (GPL-3.0)
-  https://github.com/mihawk-99/PS5_Vulkan
-  $(git -C "$vulkan" rev-parse HEAD)
-The platform layer and SDK: PS5_PayloadSDK (GPL-3.0), over ps5-payload-dev/sdk
-  https://github.com/mihawk-99/PS5_PayloadSDK
-  title: $(sed -n 's/^sdk_revision=//p' "$ps5/tools/setup-sdk.sh")
-  RADV archive: $(sed -n 's/^sdk: //p' "$provenance")
-The other libraries Aurora and SwitchWaker fetch (fmt, zstd, libpng, Dear ImGui,
-SQLite, xxHash and others) are at the versions those two projects name, at the
-revisions above.
-Compiler: $(${PS5_CLANG:-clang} --version | head -1)
-
-No game data is included. The Legend of Zelda: The Wind Waker belongs to
-Nintendo; this title does nothing without a GameCube disc image of the USA disc
-(GZLE01, .iso, .gcm or .ciso) that you provide, placed beside eboot.bin. The
-pictures in sce_sys/ are the port's own, and the files in res/ are button
-symbols from Kenney's CC0 Input Prompts and shader caches this build produced
-on a console.
-
-eboot.bin sha256: $(sha256sum "$app/eboot.bin" | cut -d' ' -f1)
-SOURCE
-out="$root/dist/WindWaker-PS5-v$version.zip"
+app = Path(sys.argv[1])
+metadata = json.loads((app / 'sce_sys/param.json').read_text())
+version = metadata.get('contentVersion', '')
+if not isinstance(version, str) or not re.fullmatch(r'[0-9]{2}\.[0-9]{3}\.[0-9]{3}', version):
+    raise SystemExit('Invalid packaged contentVersion; rebuild before packaging')
+_, minor, patch = map(int, version.split('.'))
+build_number = minor * 1000 + patch
+record = json.loads((app / 'BUILD_INPUTS.json').read_text())
+with (app / 'eboot.bin').open('rb') as binary:
+    binary_hash = hashlib.file_digest(binary, 'sha256').hexdigest()
+if record.get('eboot_sha256') != binary_hash:
+    raise SystemExit('Build metadata is missing or does not match eboot.bin; rebuild before packaging')
+if record.get('port_tracked_worktree_dirty', True):
+    raise SystemExit('This executable was built with uncommitted source changes; commit and rebuild before releasing')
+lines = [f'ProsperoWake, Build {build_number}',
+         'Unofficial PS5 homebrew. Not affiliated with Nintendo or Sony Interactive Entertainment.',
+         '', 'Distributed under GPL-3.0; see licenses/LICENSING.md and licenses/GPL-3.0.txt.',
+         '', 'Source revisions recorded when this executable was packaged:',
+         f"ProsperoWake: {record['port_revision']}"]
+for name, dependency in sorted(record['dependencies'].items()):
+    lines.append(f"{name}: {dependency['revision']}")
+external = record['external']
+lines += [f"PS5_Vulkan: {external['vulkan_revision']}",
+          f"PS5_PayloadSDK: {external['sdk_revision']}",
+          f"RADV archive SHA-256: {external['radv_archive_sha256']}"]
+if external.get('radv_provenance'):
+    lines += ['', 'RADV build provenance:', external['radv_provenance'].rstrip()]
+lines += ['', 'BUILD_INPUTS.json records the source/patch hashes and the extent of the dependency audit.',
+          'No disc image, save or HD texture pack is included. Supply a US or PAL disc image.',
+          '', f'eboot.bin SHA-256: {binary_hash}', '']
+(app / 'SOURCE.txt').write_text('\n'.join(lines))
+# Check the actual package, including external binaries and copied provenance.
+# Never patch strings inside an already signed executable: rebuild with path maps.
+private_path = re.compile(
+    rb'(?:/(?:Users|home)/[^/\s\x00"\x27]+/|[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/][^\\/\s\x00"\x27]+[\\/])')
+for path in sorted(app.rglob('*')):
+    if path.is_file() and private_path.search(path.read_bytes()):
+        raise SystemExit(f'Local build path in {path.relative_to(app)}; rebuild with source path remapping before releasing')
+print(build_number)
+PYTHON
+)
+out="$root/dist/ProsperoWake-build-$build_number.zip"
 rm -f "$out"
 (cd "$root/dist" && zip -q -r -X "$out" "$title_id" -x '*/.DS_Store')
 printf '==> %s (%s bytes)\n' "$out" "$(stat -c %s "$out")"
