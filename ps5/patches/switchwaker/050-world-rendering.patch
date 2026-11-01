@@ -1,0 +1,250 @@
+diff --git a/game/src/d/actor/d_a_lod_bg.cpp b/game/src/d/actor/d_a_lod_bg.cpp
+index eb4b1d8b..9511443c 100644
+--- a/game/src/d/actor/d_a_lod_bg.cpp
++++ b/game/src/d/actor/d_a_lod_bg.cpp
+@@ -13,6 +13,9 @@
+ #include "JSystem/JKernel/JKRExpHeap.h"
+ #include "JSystem/J3DGraphLoader/J3DModelLoader.h"
+ #include <stdio.h>
++#if defined(__PROSPERO__)
++#include "pc/pc_distant_islands.h"
++#endif
+ 
+ #if VERSION == VERSION_DEMO
+ inline daLodbg_c::daLodbg_c() {
+@@ -199,10 +202,16 @@ daLodbg_c::daLodbg_c() {
+     setExecute(&daLodbg_c::execCreateWait);
+     scale.x *= 20000.0f;
+     scale.z = scale.x + 20000.0f;
++#if defined(__PROSPERO__)
++    pc_distant_islands_attach(this);
++#endif
+     dKy_tevstr_init(&tevStr, fopAcM_GetParam(this), 0xFF);
+ }
+ 
+ daLodbg_c::~daLodbg_c() {
++#if defined(__PROSPERO__)
++    pc_distant_islands_detach(this);
++#endif
+     deleteModelData();
+     if (--sObjectCount == 0) {
+         JUT_ASSERT(0x91, sLocalHeap != NULL);
+@@ -282,6 +291,13 @@ BOOL daLodbg_c::loadModelData(const char* filename, J3DModelData*& mModelData, J
+             JKRFreeToHeap(NULL, bin);
+             bin = dst;
+         }
++#if defined(__PROSPERO__)
++        else if (pc_distant_islands_extra(this)) {
++            JKRFreeToHeap(NULL, bin);
++            pc_distant_islands_allocation_failed();
++            return FALSE;
++        }
++#endif
+     }
+ 
+     JUT_ASSERT(0x13d, mDataHeap == NULL);
+@@ -290,14 +306,31 @@ BOOL daLodbg_c::loadModelData(const char* filename, J3DModelData*& mModelData, J
+         mDataHeap->destroy();
+         mDataHeap = NULL;
+     }
++#if defined(__PROSPERO__)
++    if (mDataHeap == NULL && pc_distant_islands_extra(this)) {
++        // Optional horizon models must not fragment the archive heap.
++        JKRFreeToHeap(NULL, bin);
++        pc_distant_islands_allocation_failed();
++        return FALSE;
++    }
++#endif
+     if (mDataHeap == NULL) {
+         archiveHeap = mDoExt_getArchiveHeap();
+         mDataHeap = JKRSolidHeap::create(-1, archiveHeap, false);
+     }
++#if defined(__PROSPERO__)
++    if (mDataHeap == NULL) {
++        JKRFreeToHeap(NULL, bin);
++        return FALSE;
++    }
++#endif
+     oldHeap = JKRGetCurrentHeap();
+     mDataHeap->becomeCurrentHeap();
+     mModelData = J3DModelLoaderDataBase::loadBinaryDisplayList(bin, 0x2020);
+     if (mModelData == NULL) {
++#if defined(__PROSPERO__)
++        if (pc_distant_islands_extra(this)) pc_distant_islands_allocation_failed();
++#endif
+         JKRFreeToHeap(NULL, bin);
+         bin = NULL;
+     }
+@@ -379,6 +412,9 @@ BOOL daLodbg_c::execCreateWait() {
+     if (dist > scale.x)
+         return TRUE;
+ 
++#if defined(__PROSPERO__)
++    pc_distant_islands_begin_load(this,dist);
++#endif
+     JUT_ASSERT(VERSION_SELECT(474, 474, 503, 503), mMountCommand == NULL);
+     mMountCommand = mDoDvdThd_mountXArchive_c::create(LodAllPath, 0, JKRArchive::MOUNT_ARAM);
+     if (mMountCommand == NULL) {
+@@ -408,13 +444,24 @@ BOOL daLodbg_c::execReadWait() {
+     }
+ 
+ #if VERSION > VERSION_DEMO
++#if defined(__PROSPERO__)
++    if (!createModelData()) {
++        deleteModelData();
++        setExecute(&daLodbg_c::execCreateWait);
++        return TRUE;
++    }
++#else
+     createModelData();
++#endif
+     JUT_ASSERT(VERSION_SELECT(542, 542, 571, 571), mModel == NULL);
+     JUT_ASSERT(VERSION_SELECT(543, 543, 572, 572), mModel2[0] == NULL);
+     JUT_ASSERT(VERSION_SELECT(544, 544, 573, 573), mModel2[1] == NULL);
+ #endif
+ 
+     if (!fopAcM_entrySolidHeap(this, createHeapCallBack, 0)) {
++#if defined(__PROSPERO__)
++        if (pc_distant_islands_extra(this)) pc_distant_islands_allocation_failed();
++#endif
+ #if VERSION > VERSION_DEMO
+         mModel = NULL;
+         mModel2[0] = NULL;
+@@ -545,6 +592,9 @@ BOOL daLodbg_c::draw() {
+ #endif
+ 
+ BOOL daLodbg_c::execute() {
++#if defined(__PROSPERO__)
++    pc_distant_islands_update();
++#endif
+     return (this->*this->mExecuteFunc)();
+ }
+ 
+diff --git a/game/src/m_Do/m_Do_graphic.cpp b/game/src/m_Do/m_Do_graphic.cpp
+index 07b287cb..2d869523 100644
+--- a/game/src/m_Do/m_Do_graphic.cpp
++++ b/game/src/m_Do/m_Do_graphic.cpp
+@@ -6,6 +6,10 @@
+ #include "m_Do/machine.h" // IWYU pragma: keep
+ #if TARGET_PC
+ #include "pc/pc_aspect.h"
++#include "pc/pc_picto_geometry.h"
++#if defined(__PROSPERO__)
++#include "pc/pc_hd_visuals.h"
++#endif
+ #include "pc/pc_gpu_opts.h"
+ #include "pc/pc_dynres.h"
+ #include "pc/game_hooks.h"
+@@ -1440,6 +1444,19 @@ void mDoGph_screenCaptureDraw() {
+     GXSetViewport(0.0f, 0.0f, 640.0f, 480.0f, 0.0f, 1.0f);
+     setUpRectangle();
+ 
++#if TARGET_PC
++    if (sizeW == 152 && sizeH == 104) {
++        // The copy is already cropped to the original camera's field of view.
++        // Match its confirmation frame, without narrowing the vertices again
++        // through sourceSpan and the widened 2D projection.
++        const auto bounds = pc::picto::viewfinder(pc_aspect_ratio());
++        Mtx44 previewProjection;
++        C_MTXOrtho(previewProjection, -21.0f, 503.0f,
++                   bounds.x, bounds.x + bounds.width, 0.0f, 10.0f);
++        GXSetProjection(previewProjection, GX_ORTHOGRAPHIC);
++    }
++#endif
++
+     if (mCaptureCaptureBuffer != NULL) {
+         GXInitTexObj(&texObj, mCaptureCaptureBuffer, sizeW, sizeH, (GXTexFmt)mCaptureCaptureFormat, GX_CLAMP, GX_CLAMP, GX_FALSE);
+     } else if (mCaptureTextureBuffer != NULL) {
+@@ -1568,6 +1585,14 @@ bool mDoGph_screenCapture() {
+         GXSetCopyFilter(GX_FALSE, NULL, GX_FALSE, NULL);
+ 
+     setUpRectangle();
++#if TARGET_PC
++    // Crop only the Picto Box's copy; retain its encoding and destination size.
++    // Both monochrome and Deluxe use 152x104, copied from 304x208.
++    if (sizeW == 152 && sizeH == 104) {
++        const auto source = pc::picto::sourceSpan(centerX - sizeW, sizeW2, pc_aspect_ratio());
++        GXSetTexCopySrc(source.left, centerY - sizeH, source.width, sizeH2);
++    } else
++#endif
+     GXSetTexCopySrc(centerX - sizeW, centerY - sizeH, sizeW2, sizeH2);
+     GXSetTexCopyDst(sizeW, sizeH, (GXTexFmt)mCaptureCaptureFormat, GX_TRUE);
+ #if VERSION > VERSION_DEMO
+@@ -1690,6 +1715,9 @@ bool mDoGph_Painter() {
+             // the camera halfway between the last two draw passes' (Aurora's view delta, patch
+             // 0019) until pc_fps60_view_end below.
+             pc_fps60_view_begin(&camera->view);
++#if defined(__PROSPERO__)
++            pc_hd_visuals_prepare(&camera->view);
++#endif
+ #endif
+             PPCSync();
+             j3dSys.setViewMtx(camera->view.mViewMtx);
+@@ -1837,6 +1865,11 @@ bool mDoGph_Painter() {
+                     dComIfGp_particle_drawToonP1(&jpaDrawInfo);
+                 }
+ 
++#if defined(__PROSPERO__)
++                // Complete optional HD effects before any photo copy or HUD.
++                pc_hd_visuals_finish();
++#endif
++
+ #if VERSION == VERSION_DEMO
+                 if (mCaptureStep == 1) {
+                     mDoGph_screenCapture();
+@@ -1868,6 +1901,9 @@ bool mDoGph_Painter() {
+ #if TARGET_PC
+     pc_fps60_view_end(); // COS_FPS60_TEST step B: the view delta off before the 2D
+     pc_dynres_3d_end(); // COS_DYNRES: the 3D stretched over the EFB, full scale again
++#if defined(__PROSPERO__)
++    pc_hd_visuals_finish_image();
++#endif
+ #endif
+ 
+ #if TARGET_PC
+diff --git a/native/src/pc/game_hooks/pc_fps60_camera.cpp b/native/src/pc/game_hooks/pc_fps60_camera.cpp
+index 9ae77f3b..21764f3b 100644
+--- a/native/src/pc/game_hooks/pc_fps60_camera.cpp
++++ b/native/src/pc/game_hooks/pc_fps60_camera.cpp
+@@ -74,6 +74,10 @@ struct CamSnap {
+ CamSnap sPrev, sCur;
+ bool sResetPending = false; // dCamera_c::Reset since the last capture
+ bool sDeltaOn = false;      // AuroraSetViewDelta on in this paint
++#if defined(__PROSPERO__)
++Mtx sPaintInverse;
++f32 sPaintFovy = 0, sPaintAspect = 0, sPaintNear = 0, sPaintFar = 0;
++#endif
+ bool sModelsOn = false;     // step C: the models point at blended matrices in this paint
+ bool sSkyOn = false;        // the sky's delta (pc_fps60_sky_begin) is the current one
+ Mtx sDelta, sSkyDelta;      // C = V_t * V_cur^-1 and the sky's turn-only C
+@@ -351,11 +355,30 @@ void pc_fps60_view_begin(view_class* view) {
+                          lerpf(sPrev.nearZ, sCur.nearZ, t), lerpf(sPrev.farZ, sCur.farZ, t));
+         projParams(projT, sProjTo);
+     }
++#if defined(__PROSPERO__)
++    if (!MTXInverse(viewT,sPaintInverse)) {
++        skip("singular interpolated view");
++        return;
++    }
++    sPaintFovy=lerpf(sPrev.fovy,sCur.fovy,t);
++    sPaintAspect=lerpf(sPrev.aspect,sCur.aspect,t);
++    sPaintNear=lerpf(sPrev.nearZ,sCur.nearZ,t);
++    sPaintFar=lerpf(sPrev.farZ,sCur.farZ,t);
++#endif
+     AuroraSetViewDelta(&sDelta[0][0], sProjFrom, sProjTo);
+     sDeltaOn = true;
+     sInterp++;
+ }
+ 
++#if defined(__PROSPERO__)
++bool pc_fps60_render_camera(float inverse[12],float* fovy,float* aspect,float* nearPlane,float* farPlane) {
++    if(!sDeltaOn || !inverse || !fovy || !aspect || !nearPlane || !farPlane) return false;
++    std::memcpy(inverse,sPaintInverse,sizeof(sPaintInverse));
++    *fovy=sPaintFovy; *aspect=sPaintAspect; *nearPlane=sPaintNear; *farPlane=sPaintFar;
++    return true;
++}
++#endif
++
+ void pc_fps60_view_end(void) {
+     if (sDeltaOn) {
+         AuroraSetViewDelta(nullptr, nullptr, nullptr);

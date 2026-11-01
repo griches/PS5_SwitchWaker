@@ -1,0 +1,49 @@
+diff --git a/tests/render_worker_test.cpp b/tests/render_worker_test.cpp
+index 74e83ed..f2b6207 100644
+--- a/tests/render_worker_test.cpp
++++ b/tests/render_worker_test.cpp
+@@ -83,6 +83,44 @@ TEST_F(RenderWorkerTest, ShutdownCompletesQueuedWork) {
+   EXPECT_TRUE(aurora::gfx::render_worker::is_idle());
+ }
+ 
++// Also exercises concurrent identity reads during lifecycle transitions under TSan.
++TEST_F(RenderWorkerTest, WorkerIdentityIsLocalAcrossRestarts) {
++  namespace worker = aurora::gfx::render_worker;
++  std::atomic_bool misidentified = false;
++  std::promise<void> observing;
++  auto ready = observing.get_future();
++  std::jthread observer([&](std::stop_token stop) {
++    observing.set_value();
++    while (!stop.stop_requested()) {
++      if (worker::is_worker_thread()) {
++        misidentified.store(true, std::memory_order_relaxed);
++      }
++      std::this_thread::yield();
++    }
++  });
++  ready.wait();
++
++  for (int cycle = 0; cycle < 8; ++cycle) {
++    EXPECT_FALSE(worker::is_worker_thread());
++    worker::initialize();
++    bool insideWorker = false;
++    bool insideNestedWork = false;
++    worker::enqueue_work([&] {
++      insideWorker = worker::is_worker_thread();
++      worker::enqueue_work([&] { insideNestedWork = worker::is_worker_thread(); });
++    });
++    worker::synchronize();
++    EXPECT_TRUE(insideWorker);
++    EXPECT_TRUE(insideNestedWork);
++    worker::shutdown();
++    EXPECT_FALSE(worker::is_worker_thread());
++  }
++
++  observer.request_stop();
++  observer.join();
++  EXPECT_FALSE(misidentified.load(std::memory_order_relaxed));
++}
++
+ TEST(RenderWorkerFrameSlots, RecyclesReleasedSlots) {
+   FrameSlotPool slots{2};
+   const size_t first = slots.acquire();

@@ -1,0 +1,356 @@
+diff --git a/include/aurora/aurora.h b/include/aurora/aurora.h
+index 2b9f7d2..25506c9 100644
+--- a/include/aurora/aurora.h
++++ b/include/aurora/aurora.h
+@@ -138,6 +138,28 @@ void aurora_shutdown();
+ const AuroraEvent* aurora_update();
+ bool aurora_begin_frame();
+ void aurora_end_frame();
++/* Render and submit normally, retaining the last displayed frame. Each ended
++   frame snapshots this flag before it is queued to a worker. */
++void aurora_set_present_suppressed(bool suppressed);
++/* Optional HD effects. The native title records these with each scene. */
++// Record the completed world before photo copies and HUD drawing.
++// Logical GX camera bounds, excluding letterbox bars.
++void aurora_finish_world_effects(int32_t x, int32_t y, int32_t width, int32_t height);
++// Record final image filters after upscaling and before HUD drawing.
++void aurora_finish_image_effects(int32_t x, int32_t y, int32_t width, int32_t height);
++void aurora_set_ssao(int level);
++void aurora_set_colour_grade(int preset);
++void aurora_set_image_filters(bool fxaa, int sharpening);
++void aurora_set_bloom(bool enabled);
++void aurora_set_far_blur(bool enabled);
++void aurora_set_cloud_shadows(bool enabled);
++void aurora_set_cloud_weather(float offset_x, float offset_z, float coverage, float sunlight);
++void aurora_set_edge_light(bool enabled);
++void aurora_set_torch_light(bool enabled);
++void aurora_set_world_view(const float inv_view[12], float tan_half_fovy, float aspect,
++                           float near_plane, float sea_level, float seconds, float farPlane);
++void aurora_set_sun_direction(float x, float y, float z);
++void aurora_set_point_lights(const float* lights, uint32_t count);
+ /**
+  * Asynchronous end of frame (SwitchWaker patch 0018), off by default. aurora_end_frame then returns without
+  * waiting for the GX FIFO worker to process the frame: the worker ends it (texture caches, the last render
+diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
+index e0081a3..261e4aa 100644
+--- a/lib/gfx/encoding.cpp
++++ b/lib/gfx/encoding.cpp
+@@ -1,4 +1,5 @@
+ #include "encoding.hpp"
++#include "post_fx.hpp"
+ 
+ #include "frame.hpp"
+ 
+@@ -280,9 +281,23 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+   if (frame.census)
+     UNLIKELY { census_pass_row(frame, passInfo, label); }
+ 
++  const auto& scene = passInfo.colorAttachments[SceneColorAttachmentIndex];
+   auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
+   render_pass(pass, frame, passInfo);
+   pass.End();
++  if (passInfo.applyPostEffects && !frame.postEffectsApplied && passInfo.postEffects.any() &&
++      scene.view.Get() == webgpu::g_frameBuffer.view.Get()) {
++    post_fx::encode(cmd, passInfo.copySourceTexture, passInfo.copySourceView, passInfo.copySourceDepthView, scene.size,
++                    scene.format, scene.view, scene.resolveView, passInfo.msaaSamples, passInfo.postEffects);
++    frame.postEffectsApplied = true;
++  }
++
++  if (passInfo.applyImageEffects && !frame.imageEffectsApplied && passInfo.postEffects.image() &&
++      scene.view.Get() == webgpu::g_frameBuffer.view.Get()) {
++    post_fx::encode_image_filters(cmd, passInfo.copySourceTexture, scene.size, scene.format,
++        scene.view, scene.resolveView, passInfo.msaaSamples, passInfo.postEffects);
++    frame.imageEffectsApplied = true;
++  }
+ 
+   if (passInfo.captureDepthSnapshot) {
+     // native/patches/aurora/0009: with an EFB content scale the depth is in the top-left part.
+diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
+index 18b1edb..d1baed8 100644
+--- a/lib/gfx/frame.cpp
++++ b/lib/gfx/frame.cpp
+@@ -1,4 +1,5 @@
+ #include "frame.hpp"
++#include "post_fx.hpp"
+ 
+ #include "depth_peek.hpp"
+ #include "pipeline_cache.hpp"
+@@ -545,6 +546,7 @@ void initialize() {
+   rmlui::initialize_pipeline();
+ #endif
+   initialize_pipeline_cache();
++  post_fx::initialize();
+ }
+ 
+ void shutdown() {
+@@ -559,6 +561,7 @@ void shutdown() {
+     std::lock_guard lock{g_presentStatsMutex};
+     g_presentTimes.clear();
+   }
++  post_fx::shutdown();
+   shutdown_pipeline_cache();
+   depth_peek::shutdown();
+   tex_copy_conv::shutdown();
+diff --git a/lib/gfx/frame_packet.hpp b/lib/gfx/frame_packet.hpp
+index e36891e..6d03965 100644
+--- a/lib/gfx/frame_packet.hpp
++++ b/lib/gfx/frame_packet.hpp
+@@ -1,6 +1,7 @@
+ #pragma once
+ 
+ #include "pipeline_cache.hpp"
++#include "post_fx.hpp"
+ #include "types.hpp"
+ #include "tex_palette_conv.hpp"
+ #include "texture.hpp"
+@@ -112,6 +113,9 @@ struct RenderPass {
+   bool captureDepthSnapshot = false;
+   float depthSnapshotScale = 1.f; // native/patches/aurora/0009: the EFB part the depth was drawn in
+   bool sealed = false;
++  post_fx::State postEffects;
++  bool applyImageEffects = false; // post-upscale, before HUD
++  bool applyPostEffects = false; // explicit end-of-world boundary from the game
+   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
+ 
+   RenderTargetLayout target_layout() const noexcept;
+@@ -207,6 +211,8 @@ struct FramePacket {
+   ByteBuffer textureUpload;
+   wgpu::CommandEncoder encoder;
+   std::vector<AfterSubmitCallback> afterSubmitCallbacks;
++  bool imageEffectsApplied = false;
++  bool postEffectsApplied = false; // render-worker-owned, once per actual paint
+   uint64_t frameId = 0;
+   uint32_t frameIndex = 0;
+   size_t stagingBuffer = 0;
+diff --git a/lib/gfx/pipeline_cache.cpp b/lib/gfx/pipeline_cache.cpp
+index 5081608..6458c9b 100644
+--- a/lib/gfx/pipeline_cache.cpp
++++ b/lib/gfx/pipeline_cache.cpp
+@@ -1,4 +1,5 @@
+ #include "pipeline_cache.hpp"
++#include "pipeline_policy.hpp"
+ 
+ #include "clear.hpp"
+ #include "frame_packet.hpp"
+@@ -1286,7 +1287,11 @@ PipelineRef find_pipeline(const clear::PipelineConfig& config, const RenderTarge
+ 
+ PipelineRef find_pipeline(const gx::PipelineConfig& config, const RenderTargetLayout& layout) {
+   remember_pipeline_config(ShaderType::GX, config, current_frame(), true, true);
+-  return resolve_pipeline(ShaderType::GX, config, layout, draw_pipeline_priority());
++  // Actor-ID/alpha-clear passes are consumed by CPU readback in the same
++  // frame. Skipping a cold pipeline can turn scene alpha into a false subject.
++  const auto priority = must_wait_for_gx_pipeline(g_config.blockingPipelines, config.colorUpdate, config.alphaUpdate)
++      ? PipelinePriority::Blocking : PipelinePriority::Normal;
++  return resolve_pipeline(ShaderType::GX, config, layout, priority);
+ }
+ 
+ #ifdef AURORA_ENABLE_RMLUI
+diff --git a/lib/gfx/recording.cpp b/lib/gfx/recording.cpp
+index 70191dd..b24c183 100644
+--- a/lib/gfx/recording.cpp
++++ b/lib/gfx/recording.cpp
+@@ -54,6 +54,8 @@ struct FrameRecorder {
+   ClipRect cachedScissor;
+   bool suppressRenderWorker = false;
+   bool normalRequested = false;
++  bool postEffectsTaken = false;
++  post_fx::State postEffects;
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+   std::vector<std::string> debugGroupStack;
+ #endif
+@@ -274,6 +276,7 @@ void seal_pass(FramePacket& frame, uint32_t passIndex) {
+   if (pass.sealed) {
+     return;
+   }
++  pass.postEffects = g_recorder.postEffectsTaken ? g_recorder.postEffects : post_fx::State{};
+   pass.sealed = true;
+ }
+ 
+@@ -567,6 +570,8 @@ void enqueue_pass(FramePacket& frame, uint32_t passIndex) {
+ namespace detail {
+ 
+ void begin_recording(FramePacket& packet, size_t frameSlot) {
++  g_recorder.postEffectsTaken = false;
++  g_recorder.postEffects = {};
+   CHECK(!g_recorder.active(), "A recording session is already active");
+   if (g_recorder.normalRequested && webgpu::enable_normal_buffer()) {
+     g_recorder.normalRequested = false;
+@@ -1110,6 +1115,43 @@ bool resolve_pass(const ResolveDesc& desc, ResolvedTargets& out) {
+   return true;
+ }
+ 
++void finish_world_effects(const ClipRect& cameraScissor, bool image = false) {
++  // With no effects there is no world/HUD pass boundary to resolve. Check
++  // both live settings and an existing frame snapshot before draining queued GX.
++  if (!post_fx::any_enabled() &&
++      (!g_recorder.postEffectsTaken || !g_recorder.postEffects.any())) {
++    return;
++  }
++  gx::fifo::drain();
++  if (!g_recorder.active() || g_recorder.currentRenderPass == UINT32_MAX || g_recorder.inOffscreen ||
++      !g_recorder.postEffectsTaken || !g_recorder.postEffects.any()) {
++    return;
++  }
++  if (image ? !g_recorder.postEffects.image() : !g_recorder.postEffects.world()) return;
++  auto& frame = current_frame_packet();
++  auto& scene = current_render_passes()[g_recorder.currentRenderPass];
++  if (scene.colorAttachments[SceneColorAttachmentIndex].view.Get() != webgpu::g_frameBuffer.view.Get()) return;
++  // The game marks this after all world lists, before photo copies and HUD.
++  // Never infer this boundary from a full-size copy (reflections/blur also copy).
++  // The first perspective draw can be sky with a full-screen scissor. Use
++  // the game's camera bounds at the world boundary, including animated trim.
++  const auto clip = gx::map_logical_scissor(cameraScissor);
++  g_recorder.postEffects.worldScissor = {
++      uint32_t(std::max(0, clip.x)), uint32_t(std::max(0, clip.y)),
++      uint32_t(std::max(0, clip.width)), uint32_t(std::max(0, clip.height))};
++  g_recorder.postEffects.contentScale = g_contentScale;
++  scene.applyPostEffects = !image;
++  scene.applyImageEffects = image;
++  scene.discardable = false;
++  for (uint32_t i = 0; i < scene.colorAttachmentCount; ++i) {
++    scene.colorAttachments[i].storeOp = wgpu::StoreOp::Store;
++  }
++  if (scene.hasDepth) scene.depthStoreOp = wgpu::StoreOp::Store;
++  if (scene.hasStencil) scene.stencilStoreOp = wgpu::StoreOp::Store;
++  enqueue_pass(frame, g_recorder.currentRenderPass);
++  resume_efb_pass_loading(scene);
++}
++
+ bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSize) {
+   if (type == InvalidEncoderTask) {
+     Log.warn("push_encoder_task: invalid encoder task type");
+@@ -1164,6 +1206,16 @@ bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSi
+ template <>
+ void push_draw_command(gx::DrawData data) {
+   push_draw_command(make_draw_command<gx::render>(data));
++  if (g_recorder.currentRenderPass == UINT32_MAX) return;
++  const bool world = gx::g_gxState.projType == GX_PERSPECTIVE && gx::g_gxState.colorUpdate;
++  if (world && !g_recorder.inOffscreen && !g_recorder.postEffectsTaken) {
++    g_recorder.postEffects = post_fx::snapshot();
++    const auto& clip = g_recorder.cachedScissor;
++    g_recorder.postEffects.worldScissor = {
++        uint32_t(std::max(0, clip.x)), uint32_t(std::max(0, clip.y)),
++        uint32_t(std::max(0, clip.width)), uint32_t(std::max(0, clip.height))};
++    g_recorder.postEffectsTaken = true;
++  }
+ }
+ 
+ #ifdef AURORA_ENABLE_RMLUI
+@@ -1329,3 +1381,11 @@ void pop_debug_group() {
+   aurora::gfx::g_recorder.debugGroupStack.pop_back();
+ #endif
+ }
++
++extern "C" void aurora_finish_world_effects(int32_t x, int32_t y, int32_t width, int32_t height) {
++  aurora::gfx::finish_world_effects({x, y, width, height});
++}
++
++extern "C" void aurora_finish_image_effects(int32_t x, int32_t y, int32_t width, int32_t height) {
++  aurora::gfx::finish_world_effects({x, y, width, height}, true);
++}
+diff --git a/lib/gfx/render_worker.cpp b/lib/gfx/render_worker.cpp
+index 85783b6..6257710 100644
+--- a/lib/gfx/render_worker.cpp
++++ b/lib/gfx/render_worker.cpp
+@@ -17,7 +17,8 @@ BoundedQueue g_queue{QueueCapacity};
+ thread::Thread g_thread;
+ std::atomic_bool g_running = false;
+ std::atomic_size_t g_pendingItems = 0;
+-std::thread::id g_workerThreadId;
++// Worker identity is local to each caller; startup/shutdown must not race readers.
++thread_local bool g_isWorkerThread = false;
+ 
+ void complete_sync(const std::shared_ptr<SyncState>& sync) {
+   if (!sync) {
+@@ -32,7 +33,7 @@ void complete_sync(const std::shared_ptr<SyncState>& sync) {
+ }
+ 
+ void worker_main(std::stop_token token) {
+-  g_workerThreadId = std::this_thread::get_id();
++  g_isWorkerThread = true;
+ 
+   while (true) {
+     bool closed = false;
+@@ -55,7 +56,7 @@ void worker_main(std::stop_token token) {
+     }
+   }
+ 
+-  g_workerThreadId = {};
++  g_isWorkerThread = false;
+ }
+ 
+ void enqueue(QueueItem item) {
+@@ -266,7 +267,7 @@ void synchronize() {
+   sync->cv.wait(lock, [&] { return sync->complete; });
+ }
+ 
+-bool is_worker_thread() noexcept { return g_workerThreadId == std::this_thread::get_id(); }
++bool is_worker_thread() noexcept { return g_isWorkerThread; }
+ 
+ bool is_idle() noexcept { return g_pendingItems.load(std::memory_order_acquire) == 0; }
+ 
+diff --git a/lib/gfx/texture.cpp b/lib/gfx/texture.cpp
+index 029a3d0..9ac300a 100644
+--- a/lib/gfx/texture.cpp
++++ b/lib/gfx/texture.cpp
+@@ -201,7 +201,11 @@ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat,
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst | wgpu::TextureUsage::RenderAttachment,
++      // CopySrc: the picto box reads this copy back (pc_capture.cpp, GX_TF_RGBA8). Dawn's Vulkan
++      // copy needs the image created with TRANSFER_SRC. Without it the PS5 loses the device and
++      // Aurora's error callback aborts.
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst |
++               wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,
+@@ -234,7 +238,10 @@ TextureHandle new_conv_texture(uint32_t width, uint32_t height, u32 gxFormat, co
+   };
+   const wgpu::TextureDescriptor textureDescriptor{
+       .label = label,
+-      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment,
++      // CopySrc: I8 and RGB565 picto-box copies (the formats that need conversion). Same readback
++      // as new_render_texture above.
++      .usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::RenderAttachment |
++               wgpu::TextureUsage::CopySrc,
+       .dimension = wgpu::TextureDimension::e2D,
+       .size = size,
+       .format = wgpuFormat,
+diff --git a/lib/gx/gx.cpp b/lib/gx/gx.cpp
+index 03294db..92b0ea6 100644
+--- a/lib/gx/gx.cpp
++++ b/lib/gx/gx.cpp
+@@ -613,7 +613,12 @@ void initialize() noexcept {
+ }
+ 
+ void shutdown() noexcept {
+-  // TODO we should probably store this all in g_state.gx instead
++  // Release GX's device-owned objects before webgpu::shutdown(), not at static teardown.
++  g_emptyTextureBindGroup = {};
++  sPipelineLayout = {};
++  sEmptyTextureView = {};
++  sEmptyTexture = {};
++  sEmptySampler = {};
+   sSamplerBindGroupLayout = {};
+   sTextureBindGroupLayout = {};
+   {
+diff --git a/lib/webgpu/gpu.cpp b/lib/webgpu/gpu.cpp
+index b3ae6cd..e518f0b 100644
+--- a/lib/webgpu/gpu.cpp
++++ b/lib/webgpu/gpu.cpp
+@@ -945,6 +945,13 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+         }
+         requiredFeatures.push_back(feature);
+       }
++#ifdef WEBGPU_DAWN
++      // The FIFO, pipeline compiler and render worker can call Dawn concurrently.
++      // Ask Dawn to synchronize device operations on every backend, including Vulkan.
++      if (feature == wgpu::FeatureName::ImplicitDeviceSynchronization) {
++        requiredFeatures.push_back(feature);
++      }
++#endif
+ #ifdef TRACY_ENABLE
+       if (feature == wgpu::FeatureName::TimestampQuery) {
+         requiredFeatures.push_back(feature);
