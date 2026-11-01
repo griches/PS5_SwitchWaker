@@ -8,6 +8,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -15,6 +16,39 @@
 #include <SDL3/SDL_stdinc.h>
 
 #include "platform.h"
+
+/* FTP runs as a different user. Repair existing directories as well as new ones. */
+static void
+allow_directory_access(const char *path)
+{
+   if (chmod(path, 0777) != 0)
+      fprintf(stderr, "Cannot make directory %s FTP-accessible: %s\n", path, strerror(errno));
+}
+
+static void
+repair_cache_directories(const char *path)
+{
+   char child[1024];
+   struct dirent *entry;
+   struct stat status;
+   DIR *folder;
+
+   /* Do not follow links out of the cache tree or change cache-file permissions. */
+   if (lstat(path, &status) != 0 || !S_ISDIR(status.st_mode))
+      return;
+   allow_directory_access(path);
+   folder = opendir(path);
+   if (folder == NULL)
+      return;
+   while ((entry = readdir(folder)) != NULL) {
+      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+         continue;
+      int length = snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
+      if (length >= 0 && (size_t)length < sizeof(child))
+         repair_cache_directories(child);
+   }
+   closedir(folder);
+}
 
 /* The shader caches the title ships (res/shader-cache, filled on a console by a
  * first start: ps5/tools/link-title.sh), for a console that has none yet: Dawn's
@@ -48,6 +82,7 @@ seed_folder(const char *from, const char *to)
    if (folder == NULL)
       return;
    mkdir(to, 0777);
+   allow_directory_access(to);
    while ((entry = readdir(folder)) != NULL) {
       if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
          continue;
@@ -71,8 +106,6 @@ seed_shader_caches(void)
    if (stat("/app0/res/shader-cache/dawn_cache.db", &status) != 0)
       return;
    if (stat("/app0/user/cache/dawn_cache.db", &status) != 0) {
-      mkdir("/app0/user", 0777);
-      mkdir("/app0/user/cache", 0777);
       seed_file("/app0/res/shader-cache/dawn_cache.db", "/app0/user/cache/dawn_cache.db");
       fprintf(stderr, "shader cache: Dawn's copied from the title\n");
    }
@@ -86,7 +119,12 @@ __attribute__((constructor)) static void
 ps5_startup(void)
 {
    platform_init(PS5_TITLE_NAME);
+   mkdir("/app0/user", 0777);
+   allow_directory_access("/app0/user");
+   mkdir("/app0/user/cache", 0777);
+   allow_directory_access("/app0/user/cache");
    seed_shader_caches();
+   repair_cache_directories("/app0/radv-shader-cache");
    /* SDL_GetPrefPath is $XDG_DATA_HOME/<org>/<app>/: saves and settings. A title
     * sees its own folder (/app0, which is /data/homebrew/<TITLE_ID>) and nothing
     * else of /data, so they live there. Set in SDL's own copy of the environment,
