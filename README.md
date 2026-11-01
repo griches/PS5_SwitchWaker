@@ -1,235 +1,244 @@
-# Wind Waker (GameCube) for PlayStation 5
+<p align="center">
+  <img src="ps5/art/prosperowake-mark.svg" alt="ProsperoWake sail-and-wave logo" width="160" height="142">
+</p>
 
-[![stars](https://img.shields.io/github/stars/griches/PS5_SwitchWaker?style=flat)](https://github.com/griches/PS5_SwitchWaker/stargazers)
-[![release](https://img.shields.io/github/v/release/griches/PS5_SwitchWaker)](https://github.com/griches/PS5_SwitchWaker/releases/latest)
-[![licence](https://img.shields.io/badge/licence-GPL--3.0%20as%20built-blue)](LICENSING.md)
+<h1 align="center">ProsperoWake</h1>
 
-A PS5 homebrew port of [SwitchWaker](https://github.com/centollOS/SwitchWaker), the
-native port of the 2002 GameCube game (USA disc `GZLE01`, revision 0) compiled
-from its decompilation and drawn with [Aurora](https://github.com/encounter/aurora).
-It is laid out like [PS5_Dusklight](https://github.com/griches/PS5_Dusklight) and
-uses the same console layer: Aurora on Dawn's WebGPU on RADV, from the
-[PS5 Vulkan](https://github.com/mihawk-99/PS5_Vulkan) stack.
+<p align="center"><strong>The Wind Waker, native on PlayStation 5.</strong><br>
+4K output · HD textures · Swift sailing · PlayStation controls</p>
 
-The build reads no disc and holds no game data: SwitchWaker's runtime-assets
-mode compiles against stub headers and fills them from the player's own disc
-image when the title starts.
+ProsperoWake is an independently maintained PS5 port of **The Legend of Zelda: The Wind Waker**,
+forked from [PS5_SwitchWaker](https://github.com/griches/PS5_SwitchWaker),
+and built on [SwitchWaker](https://github.com/centollOS/SwitchWaker), with improvements
+adapted from [Bluewake](https://github.com/chrissotraidis/bluewake) and
+[Better Wind Waker](https://github.com/WideBoner/betterww).
+Plays both USA and PAL game images, with PlayStation button prompts
+and an options menu designed for the DualSense. This project targets PS5 only.
 
-## Status
+For HD textures, we recommend **[Henriko Magnifico’s Wind Waker 4K](https://www.henrikomagnifico.com/wind-waker-4k)**.
+The texture pack is downloaded separately. You supply your own game image.
 
-**Runs on the console.** First run on 2026-10-12 on a PS5 at 3840x2160: the
-title screen, name entry, the prologue and Outset, at 60 images a second
-(frame interpolation; the game's logic stays at 30), with the DualSense's
-symbols on the HUD. Played on the console as far as the forest on Outset, the
-scenes that follow it, and the boss room of Dragon Roost Cavern; nothing else
-has been seen there.
+## Features
 
-**[Version 1.0.3](https://github.com/griches/PS5_SwitchWaker/releases/tag/v1.0.3)** fixes a crash in Dragon Roost Cavern, in the rooms with
-the hanging platforms. [Version 1.0.2](https://github.com/griches/PS5_SwitchWaker/releases/tag/v1.0.2) fixed a crash when the boss of Dragon
-Roost Cavern appears, and stopped the whole class of fault behind it (an
-integer division by zero) from ending the game anywhere else. [Version 1.0.1](https://github.com/griches/PS5_SwitchWaker/releases/tag/v1.0.1)
-fixed a stop on a black screen at the end of the forest scene. See
-[Development](#development) for what
-they were. Copy the [new release](https://github.com/griches/PS5_SwitchWaker/releases/latest) over the old folder; saves carry on.
+### Graphics
 
-A release is the title's folder with no game in it: the player copies their own `GZLE01` disc image (`.iso`, `.gcm` or `.ciso`) into
-`/data/homebrew/PPSA99309/` beside `eboot.bin`, and the title finds it (the
-first one in its folder, then on a USB drive).
+- **4K and widescreen** — 1080p, 1440p and 4K output; 16:9 or original 4:3.
+- **Interpolated 60 fps** — smoother motion with the original 30 fps game logic. A 30 fps mode is also available.
+- **HD textures** — full-resolution texture packs, with an optional size limit.
+- **Resolution controls** — choose output and internal rendering resolution independently.
+- **Lighting** — ambient occlusion, wind-driven cloud shadows, sun-facing edge light and torch light.
+- **Post-processing** — colour grading, FXAA, sharpening, soft bloom, depth of field and distant blur.
+- **Distant islands** — island models visible across the sea.
+- **Widescreen photography** — corrected Picto Box captures and previews.
 
-| Area | State |
-| --- | --- |
-| Disc | Found in the title's folder; a `.iso` and a `.ciso` have both been run on the console; `.gcm` has not. A missing or wrong disc closes the title with a console notification (the close is seen working; the notification's text has not been read on a television yet) |
-| Picture | 16:9. The output is 3840x2160 unless the options menu's "Output resolution" says 2560x1440 or 1920x1080 (applied at the next start); the console scales it to the television. "Internal resolution" follows it ("Window size") or is fixed, which dynamic resolution needs |
-| 60 fps | Held at 3840x2160 in the scenes above, by the frame counter on screen. Not measured over a long session |
-| Shaders | A first start with no cache compiled 3,056 render pipelines in about 12 minutes. The title now ships the caches a console produced (`ps5/shader-cache`) and copies them into place when the console has none: the same start then compiles nothing. They must be taken from a console again after a change to Dawn, the driver or the shaders |
-| Button prompts | The HUD shows Cross (A), Square (B), Circle (X), Triangle (Y), R1 for Z, R2 for R and a right stick for the C stick (`ps5/art/make-glyphs.py`, [Kenney's CC0 Input Prompts](https://kenney.nl/assets/input-prompts)). The options menu's hints name the DualSense's buttons. Not done: the button pictures inside message text (they are in the game's font). With an HD texture pack the pack's buttons are drawn instead: see [Button symbols with a pack](#hd-textures-optional) |
-| Options menu | The touch pad's click opens it |
-| Saves, settings | `/data/homebrew/PPSA99309/user/`; the first start asks to create a save file, as the game does on an empty memory card |
-| HD textures | A Dolphin texture pack the player supplies replaces the game's textures (on when a pack is in `user/hd_textures`, off otherwise; see [HD textures](#hd-textures-optional)). Seen working on the console with Hypatia's pack on Outset and in its forest. The pack has an optional PlayStation button set for the HUD |
-| Sound | Not checked by ear in this log |
-| DevLoop | `devloop-shot` and `devloop-quit` in the title's folder (registered as `windwaker-gc`); the shot answers once the game's loop runs |
-| Art | The icon and background are the port's own, cel-shaded, made with an image generator (`ps5/art/`) |
+The **FX** tab starts on **Original**, with all its effects off. Choose **Enhanced**
+to enable them together, or adjust them individually to switch to **Custom**.
+Enhanced uses Subtle ambient occlusion, Low sharpening and Vivid colours. Ambient occlusion is experimental; cloud shadows are procedural rather
+than exact shadows of the visible clouds.
 
-Controls: left stick to move, right stick for the camera (the C stick), Cross A,
-Square B, Circle X, Triangle Y, R1 Z, L2 L, R2 R, Options START. The buttons are
-mapped by position, where the GameCube pad has them around A, so the HUD's
-symbols sit where the buttons do on the DualSense: the sword is on Square.
-The symbol of an empty item slot sits in the middle of its bubble.
+### Controls
+
+- **PlayStation prompts** throughout the HUD and file-select screens, included with the port.
+- **Right-stick camera and aiming**, with left-stick zoom for the telescope and Picto Box.
+- **R3 first-person view**, **L1 jump** and **L3 sprint** with adjustable speed.
+- **D-pad inventory navigation**, shared horizontal and vertical inversion for the camera and aiming.
+- **Controller vibration** with Original and Enhanced modes, plus adjustable strength for Enhanced. The game’s own vibration setting must also be on.
+
+Camera and aiming follow the stick direction by default. The two inversion
+toggles apply to both views; zoom stays on the left stick.
+
+### Gameplay
+
+- **Swift sailing** — double speed and following wind, plus Original and Brisk sail modes.
+- **Faster movement** — rolling, crawling, climbing, sidling, grappling and block pushing; turn while swinging on ropes.
+- **Less waiting** — instant text, faster conversation zoom, loading and Ballad of Gales, shorter fades and quicker doors.
+- **Skip replays** — options to skip song replays and the opening legend.
+- **Tingle Chests** — reveal them with ordinary bombs and locate them with the compass.
+- **Forest Water** — a 30-minute timer and trees that stay watered after it expires.
+- **Sea exploration** — corrected compass directions, optional unrestricted sailing and a revealed chart for new games.
+- **Camera shake and heat haze** — remove either effect independently.
+
+### Options menu
+
+<p align="center">
+  <img src="media/menu.webp" alt="A tour of ProsperoWake’s Graphics, FX, Gameplay, Controls and System menus">
+</p>
+
+Press the **touch pad** to open the menu.
+
+- **Five tabs:** Graphics, FX, Gameplay, Controls and System.
+- **Adjustable appearance:** text size, transparency and high contrast, with smooth scrolling and transitions.
+- **Five languages:** English, German, French, Spanish and Italian. Follow the game language or choose a menu-only override.
+- **Performance display:** compact FPS counter, detailed stats, frame-time graph or profiler; adjustable size and placement, including behind the menu. Memory figures cover game heaps, not total system memory.
+- **Developer tools:** screenshots, travel, Standard and Deluxe Picto Box items, logging and a timed menu tour.
+- **Startup hint:** the touchpad shortcut and detected disc region, with the build number and region in the menu title.
 
 ## Install
 
-Download `WindWaker-PS5-vX.Y.Z.zip` from the
-[latest release](https://github.com/griches/PS5_SwitchWaker/releases/latest) and
-unpack it: it holds one folder, `PPSA99309`. (Or build that folder yourself, see
-[Build](#build).) It contains no game data.
+You need a **homebrew-enabled PS5**, a compatible homebrew launcher such as
+**etaHEN with ShadowMountPlus**, and an unmodified **revision-0 GameCube disc image**.
 
-**What the console needs**
+| Disc | ID | Game languages |
+| --- | --- | --- |
+| USA | `GZLE01` | English |
+| PAL | `GZLP01` | English, German, French, Spanish, Italian |
 
-- A PS5 that runs homebrew, with etaHEN (or an equivalent) loaded.
-- ShadowMountPlus, which shows the folders in `/data/homebrew` as titles on the
-  home screen.
-- An FTP server on the console to copy files with (port 2121 here).
+Both regions use the same executable. ISO, GCM and CISO are supported;
+convert RVZ to ISO first. PAL’s game language is chosen in the file-select menu.
+The options-menu language can be changed on either region.
+Only one game image is used per launch; there is no disc-selection menu.
 
-**Steps**
+1. Copy the complete `PPSA99309/` folder from a release package or your build’s `dist/` folder to `/data/homebrew/` on the PS5.
+2. Place one supported game image beside `eboot.bin`.
+3. Launch ProsperoWake from the console’s home screen.
 
-1. Unpack the release (or build: the result is the folder `dist/PPSA99309/`).
-2. Copy that whole folder to the console as `/data/homebrew/PPSA99309/`, so that
-   you have:
-
-   ```text
-   /data/homebrew/PPSA99309/eboot.bin
-   /data/homebrew/PPSA99309/initial_pipeline_cache.db
-   /data/homebrew/PPSA99309/sce_sys/      (param.json, icon0.png, pic0.dds, pic1.dds)
-   /data/homebrew/PPSA99309/sce_module/libc.prx
-   /data/homebrew/PPSA99309/res/          (button symbols and shader caches)
-   /data/homebrew/PPSA99309/licenses/
-   ```
-
-   Copy `sce_sys/icon0.png` with the first upload: ShadowMountPlus will not
-   register a title without its icon.
-3. Copy your disc image into the same folder, under any name ending in `.iso`,
-   `.gcm` or `.ciso`:
-
-   ```text
-   /data/homebrew/PPSA99309/your-disc.iso
-   ```
-
-   It has to be there or on a USB drive, not elsewhere in `/data`: a title can
-   only see its own folder. The game takes the first image it finds.
-4. Wait a few seconds for "Wind Waker" to appear on the home screen, and start
-   it. The first start asks to create a save file.
-
-With no disc image, or one that is not the supported disc, the title closes and
-the console shows a notification that says why.
-
-Saves and settings are written to `/data/homebrew/PPSA99309/user/`. Copying a new
-build over the folder leaves them, and the disc image, alone.
-
-**The disc image.** Dump your own copy of the game
-([how](https://wiki.dolphin-emu.org/index.php?title=Ripping_Games)). Only the USA
-disc, `GZLE01` revision 0, is supported. If your dump is RVZ or another compressed
-format, convert it to `.iso` with [Dolphin](https://dolphin-emu.org/) first.
-
-## HD textures (optional)
-
-The game's textures are the GameCube's, made for a 480-line picture. A texture
-pack replaces them with redrawn, larger ones as the game draws them; nothing in
-the game itself changes, and the option can be turned on and off while playing.
-The port reads packs made for the [Dolphin](https://dolphin-emu.org/) emulator
-for the USA disc (`GZLE01`). No pack comes with the title: each is its author's
-own work, and you download it yourself.
-
-The pack tried here is **Hypatia's "WWHD Mod" v2.0001a**, about 5,700 textures
-covering most of the game. Its downloads are in the first post of
-[its thread on the Dolphin forum](https://forums.dolphin-emu.org/thread-55004.html).
-Take **"PC DDS Half Size"** (a `.7z` of 850 MB, 2.5 GB unpacked), which is the
-one used here:
-[direct download from the author's Google Drive mirror](https://drive.google.com/file/d/1qBK8YOeSAwLpNP3NUkwcXgvUnQPKlgj7/view?usp=sharing)
-(`Hypatia WWHD Mod v2.0001a (DDS-Half).7z`). The port reads it as it is. The full-size one is four times larger for a picture that is hard
-to tell apart, and the PNG one is not suitable.
-
-1. Unpack the `.7z` on a computer. Inside is a folder `GZL`.
-2. Copy what is **inside** `GZL` (the folders `Characters`, `Environments`,
-   `HUD` and so on) to the console, into
-   `/data/homebrew/PPSA99309/user/hd_textures/`. Create that folder if it is
-   not there. Over FTP the 5,700 files take about ten minutes.
-3. Start the game. A pack found in that folder is used from the start; the
-   options menu (the touch pad's click) has Graphics > "HD textures" to turn it
-   off and on, and remembers what you chose.
-
-With no pack in that folder the option does nothing.
-
-Seen on the console on 2026-10-12 with that pack: Outset at 3840x2160 and 60
-images a second with the textures replaced, and its forest. Not played further
-than that.
-
-**Button symbols with a pack.** The pack replaces the HUD's buttons as well, with
-its own GameCube ones, so the DualSense's symbols this port draws are lost while
-it is on. To have PlayStation buttons with the pack, also copy the `HUD` folder
-from its `-[Optional Textures]-/[HUD] Controller Buttons - Playstation` over
-the `HUD` folder in `hd_textures`, replacing files: those label the buttons by
-position, as this port maps them (Cross where A is, Square for B, Circle for X,
-Triangle for Y). The button pictures inside message text stay the GameCube's
-either way.
-
-## Development
-
-To try a change without the console:
-
-```sh
-cmake -S vendor/switchwaker/native -B build/native-mac -G Ninja \
-    -DFETCHCONTENT_SOURCE_DIR_AURORA=$PWD/.deps/aurora -DCOS_AURORA_PREPATCHED=ON \
-    -DCOS_RECOMPCORE_DIR=$PWD/.deps/recompcore \
-    -DCOS_RUNTIME_ASSETS=ON -DCOS_ASSETS_DIR=$PWD/.deps/assets/GZLE01
-ninja -C build/native-mac switchwaker
-COS_BUILD_DIR=$PWD/build/native-mac COS_DISC=/path/to/GZLE01.iso COS_FPS60=1 \
-    COS_BUTTON_GLYPHS=$PWD/ps5/art/glyphs vendor/switchwaker/native/tools/run.sh run \
-    --preset sailing --aspect 16:9 --frames 700 --shot 690
+```text
+/data/homebrew/PPSA99309/
+├── eboot.bin
+├── your-game.iso
+└── …the rest of the packaged files
 ```
 
-**Finding a fault on the console.** The game's own `[cos]` lines go to the
-console's log (klog, port 3232) with the driver's. A `[dev]` section at the end
-of `user/settings.ini` sets developer variables at the next start, for example
-`COS_TRACE=scene,res` for every scene created and every file opened. A scene
-change that stays in one step logs `scene-req-watch` lines every 300 calls: the
-step, and the processes still waiting to be deleted.
+**Updating an existing installation:** close the game, then copy the new title
+files over the existing installation. Preserve your game image, `user/` folder
+and `radv-shader-cache/` folder. ProsperoWake shares PS5_SwitchWaker’s title ID and replaces that
+installation. Saves and settings are in `/data/homebrew/PPSA99309/user/`;
+USA and PAL saves use separate `USA` and `EUR` folders; they are not shared between
+regions. Options are stored in `user/settings.ini`.
 
-The stop that 1.0.1 fixes was found that way. Some actors declare their methods
-as returning `bool` and the game's process framework calls them as returning
-`int` and compares with `TRUE`. On x86-64 the rest of the register is undefined,
-so a delete could be refused for ever and the next scene never came; on ARM (the
-Mac, the Switch) it does not show. The framework now reads only the low byte
-([`f_pc_method.cpp` in the patch](ps5/patches/switchwaker.patch)). On the Mac, `COS_EVENT_SWEEP_FOLLOW=1` lets
-`run.sh event-sweep` go on through a stage change an event asks for.
+### HD textures
 
-The crash that 1.0.3 fixes is a third one. A hanging platform of Dragon Roost
-Cavern whose ropes were cut on an earlier visit is created with them cut, and
-the rope points are simulated from values nothing has set. A NaN among them
-reaches the arctangent table as an index: the conversion to an integer gives
-0x80000000, which the GameCube's 32 bit address wraps back to the first entry
-and x86-64 turns into a read 4 GB below the table. The lookup now gives the
-first entry for a NaN or a ratio outside the table ([`c_math.cpp` in the patch](ps5/patches/switchwaker.patch)).
-It was found from a player's photograph of the console's error message: the
-two addresses in it, less the load address 0x400000, name `cM_atan2s` and
-`himo_move` in the release's ELF.
+Download [Henriko Magnifico’s Wind Waker 4K](https://www.henrikomagnifico.com/wind-waker-4k)
+from its creator. Copy the compatible DDS texture folders from inside the
+pack’s game folder into:
 
-The crash that 1.0.2 fixes is the same kind of difference. The boss of Dragon
-Roost Cavern turns towards the player with a step count that is still zero the
-first time, an integer division by zero: the GameCube and ARM give a quotient
-and go on, x86-64 raises SIGFPE. The three helpers involved now give 0
-([`c_lib.cpp` in the patch](ps5/patches/switchwaker.patch)), and so that the next one elsewhere is not a crash,
-the title handles SIGFPE itself: it finishes the division as ARM does (quotient
-0, remainder the dividend), logs `integer division fault` with the address, and
-goes on. The console's code cannot be read at run time, so the build lists
-every division instruction of the linked title in `res/div-table.bin`
-([`make-div-table.py`](ps5/tools/make-div-table.py)) and the handler looks the address up; a fault
-that is not in the list is still a crash with the console's record.
-`COS_DIV_TEST=1` in `[dev]` divides by zero once at the start to check it. On
-the Mac, `COS_SAVE_LOAD_WALK=<frames>` makes `run.sh save-load` walk forward
-from a loaded save (`COS_CARD_DIR` names a card folder holding a player's
-`.gci`).
+```text
+/data/homebrew/PPSA99309/user/hd_textures/
+```
 
-`COS_TEXTURE_DUMPS=1` writes every texture drawn into the cache folder's
-`texture_dumps`, named as a replacement for it must be named.
+HD textures are enabled automatically when a pack is installed on a fresh
+configuration. If you previously disabled them, turn on **Graphics → HD textures**.
+The supplied PlayStation prompts take priority over matching textures in the pack.
+
+### Shader caches
+
+The package includes shader caches to reduce compilation on first launch.
+The game copies them into place when no local cache exists, then reuses your
+local caches on later launches. Updated shaders or a different driver can
+still require compilation. USA and PAL use the same cache locations:
+`user/cache/` for Dawn and pipeline data, and `radv-shader-cache/` for the driver.
+
+When startup shader preparation needs a loading screen, it shows progress and,
+once enough work has completed, an estimated time remaining.
+
+<p align="center">
+  <img src="media/shaders.jpg" alt="ProsperoWake preparing shaders, showing compilation progress and estimated time remaining" width="800">
+</p>
+
+Performance depends on the scene, texture pack and graphics settings;
+4K output and interpolated 60 fps are settings, not a guarantee of a locked frame rate.
+
+## Controls
+
+<p align="center">
+  <img src="media/hud.jpg" alt="Sailing in ProsperoWake with PlayStation button prompts and the D-pad compass controls" width="800">
+</p>
+
+| DualSense | Action |
+| --- | --- |
+| Left stick | Move; up/down zooms in the telescope and Picto Box |
+| Right stick | Camera and aiming |
+| R3 | Enter or leave first-person view |
+| L1 | Jump, when enabled |
+| L3 | Toggle sprint, when enabled |
+| Cross / Square | GameCube A / B |
+| Circle / Triangle / R1 | GameCube X / Y / Z |
+| L2 / R2 | GameCube L / R |
+| Options | GameCube Start |
+| Touch pad | Open or close the options menu |
+
+**In the options menu:** D-pad or left stick to navigate, Left/Right to adjust,
+Cross to select, Square to go back, and L1/R1 to switch tabs.
+
+Most settings apply during play. Output resolution and aspect ratio require
+a restart and are marked in the menu. Some gameplay changes take effect at the
+next action—for example, lower and raise the sail after changing its mode.
+
+## Default settings
+
+These apply to a fresh configuration. Updates keep your saved preferences.
+
+| Setting | Default |
+| --- | --- |
+| Output / internal resolution | 4K / match output |
+| Aspect ratio / presentation | 16:9 / interpolated 60 fps |
+| HD textures / size limit | On when a pack is installed / No limit |
+| FX preset | Original: all effects off |
+| Sail | Swift |
+| Gameplay improvements | On, except Skip opening movie, Unrestricted boat and Reveal sea chart |
+| Remove camera shake / Remove heat haze | On |
+| Jump / sprint / D-pad inventory | On / 1.3× / On |
+| Horizontal / vertical inversion (camera and aiming) | Off / Off |
+| Controller vibration / Enhanced strength | Original / 80% |
+| Menu language / text size | Game language / Standard |
+| Menu transparency / high contrast | 40% / Off |
+| FPS counter | Off; Compact layout, bottom left |
+| Counter size / behind menu | Standard / Off |
+
+**System → Restore defaults** clears the settings file and reapplies these
+values. It keeps your saves and shader caches. Restart afterwards to apply
+startup-only settings too. High contrast overrides transparency while enabled.
 
 ## Build
 
-As PS5_Dusklight: on Linux (on a Mac, in the Lima VM) with PS5_Vulkan, PS5_Mesa
-and PS5_PayloadSDK beside this folder.
+Build on Linux, or in a Linux VM with Lima on macOS. You need Git, CMake,
+Ninja, Clang/LLVM, Python 3 and PyYAML, plus the prepared
+[PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan) toolchain.
 
-```sh
-ps5/tools/vm.sh build     # from macOS; ps5/tools/build.sh inside the VM
-ps5/tools/vm.sh deploy
-ps5/tools/vm.sh run
+The default directory layout is:
+
+```text
+PS5/
+├── ProsperoWake/     # this repository; its folder name can differ
+├── PS5_Vulkan/        # prepared RADV archive, native tools and runtime
+├── PS5_Mesa/          # driver sources used by PS5_Vulkan
+└── PS5_PayloadSDK/    # SDK fork containing the revision pinned by this port
 ```
 
-`build.sh` runs `setup-source.sh` first, which patches `vendor/switchwaker`
-(`ps5/patches/switchwaker.patch`, every hunk behind `__PROSPERO__`) and fetches
-into `.deps/` Aurora at SwitchWaker's pin with its patches, Dolphin's DSP HLE
-sources and the stub asset headers. While changing `vendor/switchwaker`, run
-`git -C vendor/switchwaker diff > ps5/patches/switchwaker.patch` before a build.
+Prepare the external Vulkan stack using its own instructions first. From this
+repository, run:
 
-## Licence
+```sh
+bash ps5/tools/build.sh
+```
 
-GPL-3.0 for the repository as a whole and for a built title: see
-[`LICENSING.md`](LICENSING.md). No game data is stored here or built in.
+The script initializes pinned source submodules, applies the port’s patches,
+and builds **`dist/PPSA99309/`**. No disc image is needed to build, and no region
+argument is needed: the executable detects USA or PAL at launch. Controller
+assets are included in the repository; a normal build does not regenerate them.
+
+On Lima, run `export PS5_BUILD_DIR="$HOME/.cache/prosperowake-build"` before building
+to keep build output on the VM’s Linux disk. For a clean rebuild, stop any active build and
+run `bash ps5/tools/build-clean.sh` first.
+
+To package a tested build made from committed source:
+
+```sh
+bash ps5/tools/package-release.sh
+```
+
+This creates `dist/ProsperoWake-build-N.zip`, using the same build number shown
+in the options menu. It does not upload the release.
+
+See the [maintenance guide](MAINTAINING.md) for dependencies, patches and releases.
+
+## Credits
+
+- **[PS5_SwitchWaker](https://github.com/griches/PS5_SwitchWaker)** by griches and its contributors, for the original PS5 port.
+- [SwitchWaker](https://github.com/centollOS/SwitchWaker) and the Wind Waker decompilation community, for the native game foundation.
+- [Bluewake](https://github.com/chrissotraidis/bluewake) and [Better Wind Waker](https://github.com/WideBoner/betterww) for improvements adapted here.
+- Aurora, Dawn and the PS5 Vulkan, Mesa and Payload SDK projects.
+- [Xelu](https://thoseawesomeguys.com/prompts/) for the PlayStation button prompts. [Asset credits](licenses/Controller-prompts.txt).
+- [Henriko Magnifico](https://www.henrikomagnifico.com/wind-waker-4k) for the recommended texture pack.
+
+[Source and asset licences](LICENSING.md). Unofficial fan project; not affiliated with Nintendo or Sony.
