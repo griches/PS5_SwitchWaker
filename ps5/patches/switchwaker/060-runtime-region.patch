@@ -1,0 +1,1003 @@
+diff --git a/game/include/d/d_message_paper.h b/game/include/d/d_message_paper.h
+index edb5e6ea..034f33a9 100644
+--- a/game/include/d/d_message_paper.h
++++ b/game/include/d/d_message_paper.h
+@@ -5,7 +5,7 @@
+ #include "d/d_drawlist.h"
+ #include "SSystem/SComponent/c_xyz.h"
+ 
+-#if VERSION < VERSION_PAL
++#if VERSION < VERSION_PAL || COS_RUNTIME_REGION
+ struct sub_msg3_class;
+ 
+ class dDlst_2DMSG3_c : public dDlst_base_c {
+diff --git a/game/include/global.h b/game/include/global.h
+index 09677d10..c5c1e5ed 100644
+--- a/game/include/global.h
++++ b/game/include/global.h
+@@ -91,6 +91,18 @@ extern void __sync();
+ #define VERSION_USA 2
+ #define VERSION_PAL 3
+ 
++// Native universal builds retain a fixed class layout, but select disc behavior at runtime.
++#if COS_RUNTIME_REGION && defined(__cplusplus)
++#include "pc/pc_disc_region.h"
++#define REGION_SELECT(USA, PAL) (pc_disc_is_pal() ? (PAL) : (USA))
++#define REGION_PAL (pc_disc_is_pal())
++#define REGION_USA (!pc_disc_is_pal())
++#else
++#define REGION_SELECT(USA, PAL) VERSION_SELECT(USA, USA, USA, PAL)
++#define REGION_PAL (VERSION == VERSION_PAL)
++#define REGION_USA (VERSION == VERSION_USA)
++#endif
++
+ #if VERSION == VERSION_DEMO
+     #define VERSION_SELECT(DEMO, JPN, USA, PAL) (DEMO)
+     #define DEMO_SELECT(DEMO, RETAIL) (DEMO)
+diff --git a/game/src/d/actor/d_a_agb.cpp b/game/src/d/actor/d_a_agb.cpp
+index 4716971a..88f25dd1 100644
+--- a/game/src/d/actor/d_a_agb.cpp
++++ b/game/src/d/actor/d_a_agb.cpp
+@@ -256,6 +256,36 @@ u8 sjis2chrNo(const char* i_chr) {
+ #else
+ /* 800CF7B4-800CF7F8       .text sjis2chrNo__FUc */
+ u8 sjis2chrNo(u8 i_chr) {
++#if COS_RUNTIME_REGION
++    static const u8 us[] = {
++        ' ',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  'H',  'I',  'J',  'K',  'L',  'M',  'N',
++        'O',  'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',  'X',  'Y',  'Z',  'a',  'b',  'c',
++        'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',  'p',  'q',  'r',
++        's',  't',  'u',  'v',  'w',  'x',  'y',  'z',  '0',  '1',  '2',  '3',  '4',  '5',  '6',
++        '7',  '8',  '9',  ' ',  0xf8, 0xd8, 0xfe, 0xde, 0x9c, 0x8c, 0xe6, 0xc6, 0xf0, 0xd0, 0xc7,
++        0xe7, 0xdf, ' ',  ' ',  '+',  0xbf, 0xa1, 0xab, 0xbb, 0x84, 0x93, '!',  ' ',  '-',  '?',
++        ' ',  ' ',  '(',  ')',  ' ',  '.',  ' ',  0xd7, 0xf7, '\'', '\"', 0x85, '/',  0xc0, 0xc8,
++        0xcc, 0xd2, 0xd9, 0xe0, 0xe8, 0xec, 0xf2, 0xf9, 0xc1, 0xc9, 0xcd, 0xd3, 0xda, 0xdd, 0xe1,
++        0xe9, 0xed, 0xf3, 0xfa, 0xfd, 0xc2, 0xca, 0xce, 0xd4, 0xdb, 0xe2, 0xea, 0xee, 0xf4, 0xfb,
++        0xc3, 0xd1, 0xd5, 0xe3, 0xf1, 0xf5, 0xc4, 0xcb, 0xcf, 0xd6, 0xdc, 0x9f, 0xe4, 0xeb, 0xef,
++        0xf6, 0xfc, 0xff, 0xc5, 0xe5, 0x8a, 0x9a, 0xba, 0xaa,
++    };
++    static const u8 pal[] = {
++        ' ',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  'H',  'I',  'J',  'K',  'L',  'M',  'N',
++        'O',  'P',  'Q',  'R',  'S',  'T',  'U',  'V',  'W',  'X',  'Y',  'Z',  'a',  'b',  'c',
++        'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',  'p',  'q',  'r',
++        's',  't',  'u',  'v',  'w',  'x',  'y',  'z',  '0',  '1',  '2',  '3',  '4',  '5',  '6',
++        '7',  '8',  '9',  ' ',  0xf8, 0xd8, 0xfe, 0xde, 0x9c, 0x8c, 0xe6, 0xc6, 0xf0, 0xd0, 0xc7,
++        0xe7, 0xdf, ' ',  ' ',  '+',  0xbf, 0xa1, 0xab, 0xbb, 0x84, 0x93, '!',  '~',  '-',  '?',
++        '/',  ' ',  '(',  ')',  ' ',  '.',  ',',  0xd7, 0xf7, '\'', '\"', 0x85, ':',  '&',  0xc0,
++        0xc8, 0xcc, 0xd2, 0xd9, 0xe0, 0xe8, 0xec, 0xf2, 0xf9, 0xc1, 0xc9, 0xcd, 0xd3, 0xda, 0xdd,
++        0xe1, 0xe9, 0xed, 0xf3, 0xfa, 0xfd, 0xc2, 0xca, 0xce, 0xd4, 0xdb, 0xe2, 0xea, 0xee, 0xf4,
++        0xfb, 0xc3, 0xd1, 0xd5, 0xe3, 0xf1, 0xf5, 0xc4, 0xcb, 0xcf, 0xd6, 0xdc, 0x9f, 0xe4, 0xeb,
++        0xef, 0xf6, 0xfc, 0xff, 0xc5, 0xe5, 0x8a, 0x9a, 0xba, 0xaa,
++    };
++    const u8* l_sjis2chrNo = REGION_PAL ? pal : us;
++    const unsigned count = REGION_PAL ? ARRAY_SIZE(pal) : ARRAY_SIZE(us);
++#else
+     static u8 l_sjis2chrNo[] = {
+ #if VERSION == VERSION_USA
+         ' ',  'A',  'B',  'C',  'D',  'E',  'F',  'G',  'H',  'I',  'J',  'K',  'L',  'M',  'N',
+@@ -283,8 +313,10 @@ u8 sjis2chrNo(u8 i_chr) {
+         0xef, 0xf6, 0xfc, 0xff, 0xc5, 0xe5, 0x8a, 0x9a, 0xba, 0xaa,
+ #endif
+     };
++    const unsigned count = ARRAY_SIZE(l_sjis2chrNo);
++#endif
+ 
+-    for (u8 i = 0; i < ARRAY_SIZE(l_sjis2chrNo); i++) {
++    for (u8 i = 0; i < count; i++) {
+         if (i_chr == l_sjis2chrNo[i]) {
+             return i;
+         }
+@@ -474,6 +506,20 @@ int daAgb_c::uploadJoyboot2() {
+ int daAgb_c::uploadMessageLoad() {
+     field_0x664--;
+     if (field_0x664 == 0) {
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++        l_gbaCommand = mDoDvdThd_toMainRam_c::create("/res/Gba/msg_LZ.bin", JKRArchive::DEFAULT_MOUNT_DIRECTION, NULL);
++}
++else {
++        char path[28];
++        char pathNum[4];
++        strcpy(path, "/res/Gba/msg_LZ");
++        sprintf(pathNum, "%d", dComIfGs_getPalLanguage());
++        strcat(path, pathNum);
++        strcat(path, ".bin");
++        l_gbaCommand = mDoDvdThd_toMainRam_c::create(path, JKRArchive::DEFAULT_MOUNT_DIRECTION, NULL);
++}
++#else
+ #if VERSION != VERSION_PAL
+         l_gbaCommand = mDoDvdThd_toMainRam_c::create("/res/Gba/msg_LZ.bin", JKRArchive::DEFAULT_MOUNT_DIRECTION, NULL);
+ #else
+@@ -484,6 +530,7 @@ int daAgb_c::uploadMessageLoad() {
+         strcat(path, pathNum);
+         strcat(path, ".bin");
+         l_gbaCommand = mDoDvdThd_toMainRam_c::create(path, JKRArchive::DEFAULT_MOUNT_DIRECTION, NULL);
++#endif
+ #endif
+         JUT_ASSERT(VERSION_SELECT(714, 715, 1000, 1001), l_gbaCommand != NULL);
+ 
+diff --git a/game/src/d/actor/d_a_mgameboard.cpp b/game/src/d/actor/d_a_mgameboard.cpp
+index 510ba6e6..997b8884 100644
+--- a/game/src/d/actor/d_a_mgameboard.cpp
++++ b/game/src/d/actor/d_a_mgameboard.cpp
+@@ -574,10 +574,15 @@ cPhs_State daMgBoard_c::_create() {
+ #if VERSION > VERSION_DEMO
+     fopAcM_SetupActor(this, daMgBoard_c);
+ #endif
++#if COS_RUNTIME_REGION
++    if (REGION_PAL) sprintf(m_arcname, "Kaisen_%d", dComIfGs_getPalLanguage());
++    else strcpy(m_arcname, "Kaisen_e");
++#else
+ #if VERSION == VERSION_PAL
+     sprintf(m_arcname, "Kaisen_%d\0", dComIfGs_getPalLanguage());
+ #elif VERSION > VERSION_JPN
+     strcpy(m_arcname, "Kaisen_e");
++#endif
+ #endif
+     cPhs_State phase = dComIfG_resLoad(&mPhase, m_arcname);
+     if (phase == cPhs_COMPLEATE_e) {
+diff --git a/game/src/d/actor/d_a_title.cpp b/game/src/d/actor/d_a_title.cpp
+index a952b393..80814714 100644
+--- a/game/src/d/actor/d_a_title.cpp
++++ b/game/src/d/actor/d_a_title.cpp
+@@ -21,8 +21,12 @@
+ #if VERSION <= VERSION_JPN
+ #include "res/Object/Tlogo.h"
+ #endif
+-#if VERSION == VERSION_USA
++#if VERSION == VERSION_USA || COS_RUNTIME_REGION
++// Both regional archives declare the same joint enums. Keep the US enums local
++// to their archive so a universal build can include both generated headers.
++namespace title_us {
+ #include "res/Object/TlogoE.h"
++}
+ #endif
+ #if VERSION == VERSION_PAL
+ #include "res/Object/TlogoE0.h"
+@@ -90,31 +94,31 @@ namespace {
+ void daTitle_proc_c::proc_init3D() {
+     m_solid_heap = mDoExt_createSolidHeapFromGameToCurrent(0x40000U, 0x20);
+ 
+-    J3DModelData* modelData_ship = (J3DModelData*)dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BDL_TITLE_SHIP_e, dRes_INDEX_TLOGO_BDL_TITLE_SHIP_e, dRes_INDEX_TLOGOE_BDL_TITLE_SHIP_e, dRes_INDEX_TLOGOE0_BDL_TITLE_SHIP_e));
++    J3DModelData* modelData_ship = (J3DModelData*)dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BDL_TITLE_SHIP_e, dRes_INDEX_TLOGOE0_BDL_TITLE_SHIP_e));
+     JUT_ASSERT(VERSION_SELECT(0xD1, 0xD1, 0xFC, 0xFC), modelData_ship != NULL);
+ 
+     mModel_ship = mDoExt_J3DModel__create(modelData_ship, 0x80000U, 0x37441423U);
+     JUT_ASSERT(VERSION_SELECT(0xD6, 0xD6, 0x101, 0x101), mModel_ship != NULL);
+ 
+-    J3DModelData* modelData_sub = (J3DModelData*)dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BDL_SUBTITLE_START_ANIM_e, dRes_INDEX_TLOGO_BDL_SUBTITLE_START_ANIM_e, dRes_INDEX_TLOGOE_BDL_SUBTITLE_START_ANIM_E_e, dRes_INDEX_TLOGOE0_BDL_SUBTITLE_START_ANIM_E_e));
++    J3DModelData* modelData_sub = (J3DModelData*)dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BDL_SUBTITLE_START_ANIM_E_e, dRes_INDEX_TLOGOE0_BDL_SUBTITLE_START_ANIM_E_e));
+     JUT_ASSERT(VERSION_SELECT(0xDA, 0xDA, 0x105, 0x105), modelData_sub != NULL);
+ 
+     mModel_subtitle = mDoExt_J3DModel__create(modelData_sub, 0x80000U, 0x37441422U);
+     JUT_ASSERT(VERSION_SELECT(0xDF, 0xDF, 0x10A, 0x10A), mModel_subtitle != NULL);
+ 
+-    J3DModelData* modelData_kirari = (J3DModelData*)dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BDL_SUBTITLE_KIRARI_e, dRes_INDEX_TLOGO_BDL_SUBTITLE_KIRARI_e, dRes_INDEX_TLOGOE_BDL_SUBTITLE_KIRARI_E_e, dRes_INDEX_TLOGOE0_BDL_SUBTITLE_KIRARI_E_e));
++    J3DModelData* modelData_kirari = (J3DModelData*)dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BDL_SUBTITLE_KIRARI_E_e, dRes_INDEX_TLOGOE0_BDL_SUBTITLE_KIRARI_E_e));
+     JUT_ASSERT(VERSION_SELECT(0xE3, 0xE3, 0x10E, 0x10E), modelData_kirari != NULL);
+ 
+     mModel_kirari = mDoExt_J3DModel__create(modelData_kirari, 0x80000U, 0x37441422U);
+     JUT_ASSERT(VERSION_SELECT(0xE8, 0xE8, 0x113, 0x113), mModel_kirari != NULL);
+ 
+-    J3DAnmTransform* bck_ship = static_cast<J3DAnmTransform*>(dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BCK_TITLE_SHIP_e, dRes_INDEX_TLOGO_BCK_TITLE_SHIP_e, dRes_INDEX_TLOGOE_BCK_TITLE_SHIP_e, dRes_INDEX_TLOGOE0_BCK_TITLE_SHIP_e)));
++    J3DAnmTransform* bck_ship = static_cast<J3DAnmTransform*>(dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BCK_TITLE_SHIP_e, dRes_INDEX_TLOGOE0_BCK_TITLE_SHIP_e)));
+     JUT_ASSERT(VERSION_SELECT(0xED, 0xED, 0x118, 0x118), bck_ship != NULL);
+ 
+     BOOL ok_bck = mBckShip.init(modelData_ship, bck_ship, TRUE, J3DFrameCtrl::EMode_LOOP);
+     JUT_ASSERT(VERSION_SELECT(0xF4, 0xF4, 0x11F, 0x11F), ok_bck != FALSE);
+ 
+-    J3DAnmColor* bpk_ship = static_cast<J3DAnmColor*>(dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BPK_TITLE_SHIP_e, dRes_INDEX_TLOGO_BPK_TITLE_SHIP_e, dRes_INDEX_TLOGOE_BPK_TITLE_SHIP_e, dRes_INDEX_TLOGOE0_BPK_TITLE_SHIP_e)));
++    J3DAnmColor* bpk_ship = static_cast<J3DAnmColor*>(dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BPK_TITLE_SHIP_e, dRes_INDEX_TLOGOE0_BPK_TITLE_SHIP_e)));
+     JUT_ASSERT(VERSION_SELECT(0xF9, 0xF9, 0x124, 0x124), bpk_ship != NULL);
+ 
+     BOOL ok_bpk = mBpkShip.init(modelData_ship, bpk_ship, TRUE, J3DFrameCtrl::EMode_LOOP);
+@@ -123,13 +127,13 @@ void daTitle_proc_c::proc_init3D() {
+     mBpkShip.setFrame(0.0f);
+     mBpkShip.setPlaySpeed(1.0f);
+ 
+-    J3DAnmTextureSRTKey* btk_sub = static_cast<J3DAnmTextureSRTKey*>(dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BTK_SUBTITLE_START_ANIM_e, dRes_INDEX_TLOGO_BTK_SUBTITLE_START_ANIM_e, dRes_INDEX_TLOGOE_BTK_SUBTITLE_START_ANIM_E_e, dRes_INDEX_TLOGOE0_BTK_SUBTITLE_START_ANIM_E_e)));
++    J3DAnmTextureSRTKey* btk_sub = static_cast<J3DAnmTextureSRTKey*>(dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BTK_SUBTITLE_START_ANIM_E_e, dRes_INDEX_TLOGOE0_BTK_SUBTITLE_START_ANIM_E_e)));
+     JUT_ASSERT(VERSION_SELECT(0x106, 0x106, 0x131, 0x131), btk_sub != NULL);
+ 
+     BOOL ok_btk_subtitle = mBtkSub.init(modelData_sub, btk_sub, TRUE, J3DFrameCtrl::EMode_NONE);
+     JUT_ASSERT(VERSION_SELECT(0x10D, 0x10D, 0x138, 0x138), ok_btk_subtitle != FALSE);
+ 
+-    J3DAnmTextureSRTKey* btk_kirari = static_cast<J3DAnmTextureSRTKey*>(dComIfG_getObjectRes(ARCNAME, VERSION_SELECT(dRes_INDEX_TLOGO_BTK_SUBTITLE_KIRARI_e, dRes_INDEX_TLOGO_BTK_SUBTITLE_KIRARI_e, dRes_INDEX_TLOGOE_BTK_SUBTITLE_KIRARI_E_e, dRes_INDEX_TLOGOE0_BTK_SUBTITLE_KIRARI_E_e)));
++    J3DAnmTextureSRTKey* btk_kirari = static_cast<J3DAnmTextureSRTKey*>(dComIfG_getObjectRes(ARCNAME, REGION_SELECT(title_us::dRes_INDEX_TLOGOE_BTK_SUBTITLE_KIRARI_E_e, dRes_INDEX_TLOGOE0_BTK_SUBTITLE_KIRARI_E_e)));
+     JUT_ASSERT(VERSION_SELECT(0x112, 0x112, 0x13D, 0x13D), btk_kirari != NULL);
+ 
+     BOOL ok_btk_kirari = mBtkKirari.init(modelData_kirari, btk_kirari, TRUE, J3DFrameCtrl::EMode_LOOP);
+@@ -494,9 +498,14 @@ daTitle_c::~daTitle_c() {
+ cPhs_State daTitle_c::create() {
+     fopAcM_ct(this, daTitle_c);
+ 
++#if COS_RUNTIME_REGION
++    if (REGION_PAL) sprintf(ARCNAME, "TlogoE%d", dComIfGs_getPalLanguage());
++    else strcpy(ARCNAME, "TlogoE");
++#else
+ #if VERSION == VERSION_PAL
+     // Use sprintf to modify the supposedly read-only "TlogoE0" string literal.
+     sprintf(ARCNAME, "TlogoE%d\0", dComIfGs_getPalLanguage());
++#endif
+ #endif
+ 
+     cPhs_State phase_state = dComIfG_resLoad(&mPhs, ARCNAME);
+diff --git a/game/src/d/d_2dnumber.cpp b/game/src/d/d_2dnumber.cpp
+index c161909b..609441e1 100644
+--- a/game/src/d/d_2dnumber.cpp
++++ b/game/src/d/d_2dnumber.cpp
+@@ -396,6 +396,11 @@ f32 dDlst_2DOutFont_c::iconset(int i_iconNo, char** param_1) {
+             break;
+         }
+ 
++#if COS_RUNTIME_REGION
++        var_f31 = m6C + mCharSpace + REGION_SELECT(0.0f, 0.5f);
++        char buffer[16];
++        sprintf(buffer, "\x1B""CR[%d]", (int)(var_f31 + REGION_SELECT(0.5f, 0.0f)));
++#else
+ #if VERSION == VERSION_PAL
+         var_f31 = 0.5f + (m6C + mCharSpace);
+ 
+@@ -406,6 +411,7 @@ f32 dDlst_2DOutFont_c::iconset(int i_iconNo, char** param_1) {
+ 
+         char buffer[16];
+         sprintf(buffer, "\x1B""CR[%d]", (int)(var_f31 + 0.5f));
++#endif
+ #endif
+ 
+         char c;
+@@ -536,6 +542,39 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+ 
+             message += *message - 1;
+         } else {
++#if COS_RUNTIME_REGION
++            int hi_nibble = ((u8)*message >> 4) & 0xF;
++            if (REGION_USA && (hi_nibble == 8 || hi_nibble == 9)) {
++                char temp_r4_2 = *message++;
++                *(dst++) = temp_r4_2;
++                char temp_r5 = *(dst++) = *message++;
++                m68 += charWidth(((u8)temp_r4_2 << 8) | (u8)temp_r5);
++
++                if (var_r30 != 0) {
++                    var_r30--;
++                    if (var_r30 == 0) {
++                        char sp34[16];
++
++                        f32 center = var_f29 + ((m68 - var_f29) / 2);
++                        f32 temp_f0 = center - (var_f31 / 2);
++                        if (var_f30 < temp_f0) {
++                            f32 temp_f28 = temp_f0 - var_f30;
++                            sprintf(sp34, "\x1b""CR[%d]", (int)(temp_f28 + 0.5f));
++                            strcat(spA0, sp34);
++                            var_f30 += temp_f28;
++                        } else if (var_f30 > temp_f0) {
++                            f32 temp_f28 = var_f30 - temp_f0;
++                            sprintf(sp34, "\x1b""CL[%d]", (int)(temp_f28 + 0.5f));
++                            strcat(spA0, sp34);
++                            var_f30 -= temp_f28;
++                        }
++
++                        var_f30 += var_f31;
++                        strcat(spA0, sp6C);
++                    }
++                }
++            } else
++#else
+ #if VERSION < VERSION_PAL
+             int hi_nibble = ((u8)*message >> 4) & 0xF;
+             if (hi_nibble == 8 || hi_nibble == 9) {
+@@ -568,14 +607,19 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+                     }
+                 }
+             } else
++#endif
+ #endif
+             {
+                 char var_r5_2 = *message++;
+                 *(dst++) = var_r5_2;
+ 
+                 if (var_r5_2 == '\n') {
++#if COS_RUNTIME_REGION
++                    if (REGION_USA || i_msgNo != 0x5f) {
++#else
+ #if VERSION == VERSION_PAL
+                     if (i_msgNo != 0x5f) {
++#endif
+ #endif
+                     char sp24[16];
+                     *dst = 0;
+@@ -621,6 +665,14 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+ 
+     *dst = 0;
+ 
++#if COS_RUNTIME_REGION
++    f32 y = 0.0f;
++    if (REGION_PAL) {
++        y = ((mpTextBox->getHeight() - mFontSize.mSizeY) - m82 * mpTextBox->getLineSpace()) / 2;
++    } else if (m74 == 0) {
++        y = ((mpTextBox->getHeight() - m6C) - m82 * mpTextBox->getLineSpace()) / 2;
++    }
++#else
+     #if VERSION == VERSION_PAL
+     f32 y = ((mpTextBox->getHeight() - mFontSize.mSizeY) - m82 * mpTextBox->getLineSpace()) / 2;
+     #elif VERSION >= VERSION_USA
+@@ -631,6 +683,7 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+     #else
+     f32 y = ((mpTextBox->getHeight() - m6C) - m82 * mpTextBox->getLineSpace()) / 2;
+     #endif
++#endif
+ 
+     char sp14[16];
+     int temp_r30 = (mpTextBox->getWidth() - m68) / 2;
+@@ -674,6 +727,18 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+ 
+     #if VERSION >= VERSION_USA
+     if (m74) {
++#if COS_RUNTIME_REGION
++        if (mpTextBox->getWidth() - REGION_SELECT(0.0f, 5.0f) < m68) {
++            if (REGION_PAL) {
++                f32 ratio = (mpTextBox->getWidth() - 5.0f) / m68;
++                int sizeX = ratio * mFontSize.mSizeX;
++                mCharSpace = (int)(mpTextBox->getCharSpace() * ratio);
++                mpTextBox->setCharSpace(mCharSpace);
++                mFontSize.mSizeX = m6C = sizeX;
++            } else {
++                mFontSize.mSizeX = (int)(mFontSize.mSizeX * (mpTextBox->getWidth() / m68));
++            }
++#else
+     #if VERSION == VERSION_PAL
+         if (mpTextBox->getWidth() - 5.0f < m68) {
+             f32 ratio = (mpTextBox->getWidth() - 5.0f) / m68;
+@@ -685,6 +750,7 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+         if (mpTextBox->getWidth() < m68) {
+             mFontSize.mSizeX = (int)(mFontSize.mSizeX * (mpTextBox->getWidth() / m68));
+     #endif
++#endif
+ 
+             J2DTextBox::TFontSize fontSize = mFontSize;
+             mpTextBox->setFontSize(fontSize);
+diff --git a/game/src/d/d_message_paper.cpp b/game/src/d/d_message_paper.cpp
+index 0a9130e9..1a768b24 100644
+--- a/game/src/d/d_message_paper.cpp
++++ b/game/src/d/d_message_paper.cpp
+@@ -24,7 +24,7 @@
+ #include "stdio.h"
+ #include "string.h"
+ 
+-#if VERSION < VERSION_PAL
++#if VERSION < VERSION_PAL || COS_RUNTIME_REGION
+ void dMsg3_messageDataInit(sub_msg3_class* i_Msg, int);
+ void dMsg3_textPosition(sub_msg3_class* i_Msg, u8 i_index);
+ void dMsg3_yose_select(sub_msg3_class* i_Msg, u8 i_index);
+@@ -1245,7 +1245,11 @@ static msg_method_class l_dMsg3_Method = {
+     (process_method_func)dMsg3_Draw
+ };
+ 
++#if COS_RUNTIME_REGION
++static msg_process_profile_definition g_profile_MSG3_us = {
++#else
+ msg_process_profile_definition g_profile_MSG3 = {
++#endif
+     /* Layer ID     */ fpcLy_CURRENT_e,
+     /* List ID      */ 12,
+     /* List Prio    */ fpcPi_CURRENT_e,
+@@ -1365,7 +1369,11 @@ static msg_method_class l_dMessage_Paper_Method = {
+     (process_method_func)dMessage_Paper_Draw
+ };
+ 
++#if COS_RUNTIME_REGION
++static msg_process_profile_definition g_profile_MSG3_pal = {
++#else
+ msg_process_profile_definition g_profile_MSG3 = {
++#endif
+     /* Layer ID     */ fpcLy_CURRENT_e,
+     /* List ID      */ 12,
+     /* List Prio    */ fpcPi_CURRENT_e,
+@@ -1379,3 +1387,9 @@ msg_process_profile_definition g_profile_MSG3 = {
+     /* Msg SubMtd   */ &l_dMessage_Paper_Method,
+ };
+ #endif
++
++#if COS_RUNTIME_REGION
++// Keep the distinct native actor types and select the profile before the game starts.
++// The process list uses a single stable MSG3 identity in both regions.
++msg_process_profile_definition g_profile_MSG3 = REGION_PAL ? g_profile_MSG3_pal : g_profile_MSG3_us;
++#endif
+diff --git a/game/src/d/d_minigame_starter.cpp b/game/src/d/d_minigame_starter.cpp
+index 173e66e0..89ad6ff3 100644
+--- a/game/src/d/d_minigame_starter.cpp
++++ b/game/src/d/d_minigame_starter.cpp
+@@ -46,12 +46,23 @@ cPhs_State dMinigame_Starter_c::_create() {
+         if (mHeap != NULL) {
+             mStarterScrn = new dDlst_StarterScrnDraw_c();
+ 
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            char resname[32];
++            sprintf(resname, "ship_race1_%d.blo", dComIfGs_getPalLanguage());
++            mStarterScrn->setScreen(resname, resInfo->getArchive());
++}
++else {
++            mStarterScrn->setScreen("ship_race1.blo", resInfo->getArchive());
++}
++#else
+ #if VERSION == VERSION_PAL
+             char resname[32];
+             sprintf(resname, "ship_race1_%d.blo", dComIfGs_getPalLanguage());
+             mStarterScrn->setScreen(resname, resInfo->getArchive());
+ #else
+             mStarterScrn->setScreen("ship_race1.blo", resInfo->getArchive());
++#endif
+ #endif
+             mDoExt_restoreCurrentHeap();
+             mDoExt_adjustSolidHeap(mHeap);
+diff --git a/game/src/d/d_minigame_terminater.cpp b/game/src/d/d_minigame_terminater.cpp
+index 2b2ee2d7..0aa41bbf 100644
+--- a/game/src/d/d_minigame_terminater.cpp
++++ b/game/src/d/d_minigame_terminater.cpp
+@@ -66,6 +66,43 @@ cPhs_State dMinigame_Terminater_c::_create() {
+ #endif
+         if (mHeap != NULL) {
+             mScrn = new dDlst_TerminaterScrnDraw_c();
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            u8 lang = dComIfGs_getPalLanguage();
++            if (lang == 1) {
++                dMgtem_perfect_tex = 8;
++                dMgtem_failed_tex = 13;
++                dMgtem_yougot_tex = 10;
++                dMgtem_remain_tex = 15;
++            } else if (lang == 2) {
++                dMgtem_perfect_tex = 8;
++                dMgtem_failed_tex = 17;
++                dMgtem_yougot_tex = 13;
++                dMgtem_remain_tex = 12;
++            } else if (lang == 3) {
++                dMgtem_perfect_tex = 10;
++                dMgtem_failed_tex = 6;
++                dMgtem_yougot_tex = 9;
++                dMgtem_remain_tex = 14;
++            } else if (lang == 4) {
++                dMgtem_perfect_tex = 9;
++                dMgtem_failed_tex = 13;
++                dMgtem_yougot_tex = 11;
++                dMgtem_remain_tex = 14;
++            } else {
++                dMgtem_perfect_tex = 8;
++                dMgtem_failed_tex = 8;
++                dMgtem_yougot_tex = 6;
++                dMgtem_remain_tex = 13;
++            }
++            char buf[32];
++            sprintf(buf, "ship_race2_%d.blo", lang);
++            mScrn->setScreen(buf, resInfo->getArchive());
++}
++else {
++            mScrn->setScreen("ship_race2.blo", resInfo->getArchive());
++}
++#else
+ #if VERSION == VERSION_PAL
+             u8 lang = dComIfGs_getPalLanguage();
+             if (lang == 1) {
+@@ -99,6 +136,7 @@ cPhs_State dMinigame_Terminater_c::_create() {
+             mScrn->setScreen(buf, resInfo->getArchive());
+ #else
+             mScrn->setScreen("ship_race2.blo", resInfo->getArchive());
++#endif
+ #endif
+             mDoExt_restoreCurrentHeap();
+             mDoExt_adjustSolidHeap(mHeap);
+diff --git a/game/src/d/d_place_name.cpp b/game/src/d/d_place_name.cpp
+index da28e2d1..5660024a 100644
+--- a/game/src/d/d_place_name.cpp
++++ b/game/src/d/d_place_name.cpp
+@@ -148,11 +148,21 @@ cPhs_State dPn_c::_create() {
+             mState = 1;
+             dvd = NULL;
+ 
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            return cPhs_INIT_e;
++}
++else {
++            if (dComIfGp_getNowStageNum() != 0)
++                return cPhs_INIT_e;
++}
++#else
+ #if VERSION == VERSION_PAL
+             return cPhs_INIT_e;
+ #else
+             if (dComIfGp_getNowStageNum() != 0)
+                 return cPhs_INIT_e;
++#endif
+ #endif
+         } else {
+             return rt;
+@@ -161,6 +171,16 @@ cPhs_State dPn_c::_create() {
+         JKRHeap * oldHeap = mDoExt_setCurrentHeap(mpHeap);
+         JUT_ASSERT(VERSION_SELECT(175, 175, 201, 201), dComIfGp_getNowStageNum() < dPn_stage_max_e);
+ 
++#if COS_RUNTIME_REGION
++        char buf[64];
++        if (REGION_PAL) {
++            const u32 lang = dComIfGs_getPalLanguage();
++            sprintf(buf, "/res/placename/PN%d/pn_%02d_%d.bti", lang, dComIfGp_getNowStageNum() + 1, lang);
++        } else {
++            sprintf(buf, "/res/placename/pn_%02d.bti", dComIfGp_getNowStageNum() + 1);
++        }
++        dvd = mDoDvdThd_toMainRam_c::create(buf, JKRArchive::DEFAULT_MOUNT_DIRECTION, mpHeap);
++#else
+ #if VERSION == VERSION_PAL
+         u32 lang = dComIfGs_getPalLanguage();
+         char buf[32];
+@@ -168,6 +188,7 @@ cPhs_State dPn_c::_create() {
+         dvd = mDoDvdThd_toMainRam_c::create(buf, JKRArchive::DEFAULT_MOUNT_DIRECTION, mpHeap);
+ #else
+         dvd = mDoDvdThd_toMainRam_c::create(name_texture[dComIfGp_getNowStageNum()], JKRArchive::DEFAULT_MOUNT_DIRECTION, mpHeap);
++#endif
+ #endif
+ 
+         mState = 2;
+diff --git a/game/src/d/d_s_logo.cpp b/game/src/d/d_s_logo.cpp
+index c57c0208..a0fba1ea 100644
+--- a/game/src/d/d_s_logo.cpp
++++ b/game/src/d/d_s_logo.cpp
+@@ -625,8 +625,10 @@ static BOOL dScnLogo_Delete(dScnLogo_c* i_this) {
+         dComIfGp_setBossBattleData(JKRAllocFromAram(sizeof(dSv_player_status_c_c), JKRAramHeap::HEAD), i);
+     }
+ 
+-#if VERSION == VERSION_PAL
+-    g_dComIfG_gameInfo.play.field_0x4820 = JKRAllocFromAram(0xB000, JKRAramHeap::HEAD);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        g_dComIfG_gameInfo.play.field_0x4820 = JKRAllocFromAram(0xB000, JKRAramHeap::HEAD);
++    }
+ #endif
+ 
+ #if VERSION == VERSION_DEMO
+@@ -664,9 +666,11 @@ cPhs_State phase_0(dScnLogo_c* i_this) {
+     if (mDoAud_zelAudio_c::isInitFlag() && mDoAud_checkFirstWaves())
+         return cPhs_INIT_e;
+ 
+-#if VERSION == VERSION_PAL
+-    if (mDoDvdThd::SyncWidthSound == 0)
+-        return cPhs_INIT_e;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        if (mDoDvdThd::SyncWidthSound == 0)
++            return cPhs_INIT_e;
++    }
+ #endif
+ 
+     s32 rt;
+@@ -682,8 +686,10 @@ cPhs_State phase_0(dScnLogo_c* i_this) {
+ #endif
+     JUT_ASSERT(VERSION_SELECT(1131, 1173, 1354, 1382), rt == 1);
+ 
+-#if VERSION == VERSION_PAL
+-    g_mDoMemCd_control.load2();
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        g_mDoMemCd_control.load2();
++    }
+ #endif
+ 
+ #if VERSION > VERSION_DEMO
+@@ -699,31 +705,33 @@ cPhs_State phase_1(dScnLogo_c* i_this) {
+     if (dComIfG_syncAllObjectRes() != 0)
+         return cPhs_INIT_e;
+ 
+-#if VERSION == VERSION_PAL
+-    s32 rt = g_mDoMemCd_control.LoadSync2();
+-    if (rt == 0) {
+-        return cPhs_INIT_e;
+-    } else if (rt == 1) {
+-        if (g_mDoMemCd_control.field_0x165B >= 5) {
+-            g_mDoMemCd_control.field_0x165B = 0;
+-        }
+-        dComIfGs_setPalLanguage(g_mDoMemCd_control.field_0x165B);
+-    } else {
+-        u8 language = OSGetLanguage();
+-        if (language >= 5) {
+-            language = 0;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        s32 rt = g_mDoMemCd_control.LoadSync2();
++        if (rt == 0) {
++            return cPhs_INIT_e;
++        } else if (rt == 1) {
++            if (g_mDoMemCd_control.field_0x165B >= 5) {
++                g_mDoMemCd_control.field_0x165B = 0;
++            }
++            dComIfGs_setPalLanguage(g_mDoMemCd_control.field_0x165B);
++        } else {
++            u8 language = OSGetLanguage();
++            if (language >= 5) {
++                language = 0;
++            }
++            dComIfGs_setPalLanguage(language);
++            g_mDoMemCd_control.field_0x165B = language;
+         }
+-        dComIfGs_setPalLanguage(language);
+-        g_mDoMemCd_control.field_0x165B = language;
+-    }
+ #if TARGET_PC
+-    // SwitchWaker: the options menu's COS_GAME_LANGUAGE may choose another one (pc_language.cpp).
+-    {
+-        const u8 lang = (u8)pc_logo_pal_language(dComIfGs_getPalLanguage(), rt == 1);
+-        dComIfGs_setPalLanguage(lang);
+-        g_mDoMemCd_control.field_0x165B = lang;
+-    }
++        // SwitchWaker: the options menu's COS_GAME_LANGUAGE may choose another one (pc_language.cpp).
++        {
++            const u8 lang = (u8)pc_logo_pal_language(dComIfGs_getPalLanguage(), rt == 1);
++            dComIfGs_setPalLanguage(lang);
++            g_mDoMemCd_control.field_0x165B = lang;
++        }
+ #endif
++    }
+ #endif
+ 
+     ResTIMG * toonImage;
+@@ -911,6 +919,17 @@ cPhs_State phase_2(dScnLogo_c* i_this) {
+     l_clothResCommand = aramMount("/res/Msg/clothres.arc");
+     l_itemiconCommand = aramMount("/res/Msg/itemicon.arc");
+ 
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++    delete g_dComIfG_gameInfo.play.field_0x4820;
++    char buf[40];
++    sprintf(buf, "/res/Msg/data%d/acticon.arc", dComIfGs_getPalLanguage());
++    l_actioniconCommand = aramMount(buf);
++}
++else {
++    l_actioniconCommand = aramMount("/res/Msg/acticon.arc");
++}
++#else
+ #if VERSION == VERSION_PAL
+     delete g_dComIfG_gameInfo.play.field_0x4820;
+     char buf[40];
+@@ -918,6 +937,7 @@ cPhs_State phase_2(dScnLogo_c* i_this) {
+     l_actioniconCommand = aramMount(buf);
+ #else
+     l_actioniconCommand = aramMount("/res/Msg/acticon.arc");
++#endif
+ #endif
+ 
+     l_scopeResCommand = aramMount("/res/Msg/scoperes.arc");
+@@ -932,12 +952,22 @@ cPhs_State phase_2(dScnLogo_c* i_this) {
+     l_errorResCommand = aramMount("/res/Msg/errorres.arc");
+     l_saveResCommand = aramMount("/res/Msg/saveres.arc");
+ 
++#if COS_RUNTIME_REGION
++    if (REGION_PAL) {
++        char buf[40];
++        sprintf(buf, "/res/Msg/data%d/bmgres.arc", dComIfGs_getPalLanguage());
++        l_msgDtCommand = onMemMount(buf);
++    } else {
++        l_msgDtCommand = onMemMount("/res/Msg/bmgres.arc");
++    }
++#else
+ #if VERSION == VERSION_PAL
+     sprintf(buf, "/res/Msg/data%d/bmgres.arc", dComIfGs_getPalLanguage());
+     l_msgDtCommand = onMemMount(buf);
+ #else
+     l_msgDtCommand = onMemMount("/res/Msg/bmgres.arc");
+ #endif
++#endif
+ 
+ #if VERSION > VERSION_JPN
+     l_msgDtCommand2 = onMemMount("/res/Msg/bmgresh.arc");
+diff --git a/game/src/d/d_s_title.cpp b/game/src/d/d_s_title.cpp
+index ade83534..784e1fb4 100644
+--- a/game/src/d/d_s_title.cpp
++++ b/game/src/d/d_s_title.cpp
+@@ -100,8 +100,10 @@ static BOOL dScnTitle_IsDelete(title_of_scene_class* i_this) {
+ 
+ /* 802374D0-802374D8       .text dScnTitle_Delete__FP20title_of_scene_class */
+ static BOOL dScnTitle_Delete(title_of_scene_class* i_this) {
+-#if VERSION == VERSION_PAL
+-    dComIfGp_event_remove();
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        dComIfGp_event_remove();
++    }
+ #endif
+     return TRUE;
+ }
+@@ -123,7 +125,7 @@ static cPhs_State dScnTitle_Create(scene_class* i_scn) {
+ 
+ #if VERSION == VERSION_PAL
+     dScnTitle_c::mMp = NULL;
+-    if (fpcM_GetName(i_this) == fpcNm_ENDING_SCENE_e) {
++    if (REGION_PAL && fpcM_GetName(i_this) == fpcNm_ENDING_SCENE_e) {
+         fopMsgM_Create(fpcNm_MSG3_e, NULL, NULL);
+     }
+ #endif
+diff --git a/game/src/d/d_scope.cpp b/game/src/d/d_scope.cpp
+index 90e8f2f7..c1f533c4 100644
+--- a/game/src/d/d_scope.cpp
++++ b/game/src/d/d_scope.cpp
+@@ -6,6 +6,9 @@
+ #include "d/dolzel.h" // IWYU pragma: keep
+ #if TARGET_PC
+ #include "pc/pc_aspect.h"
++#if defined(__PROSPERO__)
++#include "pc/pc_ui_assets.h"
++#endif
+ #endif
+ #include "d/d_scope.h"
+ #include "f_op/f_op_msg.h"
+@@ -159,6 +162,20 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+     fopMsgM_paneTrans(&i_Scp->mCzomPane, 0.0f, 0.0f);
+ #endif
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    // Zoom uses the left stick. Keep its letter upright; the separate arrows
++    // indicate direction. Replace both textures used by the prompt animation.
++    fopMsgM_pane_class* zoomPanes[] = {&i_Scp->mCrtnPane, &i_Scp->mCzomPane};
++    for (auto* pane : zoomPanes) {
++        auto* picture = static_cast<J2DPicture*>(pane->pane);
++        picture->changeTexture("font_07_01.bti", 0);
++        // Remove the original C-stick tint without changing the pane's fade.
++        picture->setBlackWhite(JUtility::TColor(0), JUtility::TColor(0xffffffff));
++        picture->setCornerColor(JUtility::TColor(0xffffffff));
++        fopMsgM_blendInit(pane, "font_07_02.bti");
++        picture->rotate(pane->mSizeOrig.x / 2.0f, pane->mSizeOrig.y / 2.0f, ROTATE_Z, 0.0f);
++    }
++#else
+     fopMsgM_blendInit(&i_Scp->mCrtnPane, "font_09_02.bti");
+     fopMsgM_blendInit(&i_Scp->mCzomPane, "font_09_02.bti");
+ 
+@@ -168,9 +185,27 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+         ROTATE_Z,
+         180.0f
+     );
++#endif
+ 
+     fopMsgM_blendInit(&i_Scp->mYrtnPane, "cursor_00_02.bti");
+     fopMsgM_blendInit(&i_Scp->mYzomPane, "cursor_00_02.bti");
++#if TARGET_PC && defined(__PROSPERO__)
++    // Use the generated arrow with neutral colours; retain the zoom animation.
++    fopMsgM_pane_class* zoomArrows[] = {&i_Scp->mYrtnPane, &i_Scp->mYzomPane};
++    for (auto* pane : zoomArrows) {
++        auto* picture = static_cast<J2DPicture*>(pane->pane);
++        if (auto* arrow = static_cast<ResTIMG*>(pc_ui_assets_zoom_arrow())) {
++            picture->changeTexture(arrow, 0);
++            picture->changeTexture(arrow, 1);
++            picture->setMirror(static_cast<J2DMirror>(0));
++            picture->setBlackWhite(JUtility::TColor(0), JUtility::TColor(0xffffffff));
++            picture->setCornerColor(JUtility::TColor(0xffffffff));
++            picture->rotate(pane->mSizeOrig.x / 2.0f, pane->mSizeOrig.y / 2.0f,
++                            ROTATE_Z, pane == &i_Scp->mYrtnPane ? 180.0f : 0.0f);
++        }
++    }
++#endif
++
+ 
+     dScp_wipeMove(i_Scp, 3.0f);
+ 
+@@ -186,6 +221,23 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+     i_Scp->mpTextBoxSdw = (J2DTextBox*)dScp_MsgScreen->search('tx80');
+     i_Scp->mpRubyBoxSdw = (J2DTextBox*)dScp_MsgScreen->search('tx81');
+ 
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++    if (dComIfGs_getOptRuby()) {
++        i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 14.0f);
++        i_Scp->mpTextBoxSdw->move(i_Scp->mpTextBoxSdw->getBounds().i.x, i_Scp->mpTextBoxSdw->getBounds().i.y - 14.0f);
++    } else {
++        i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 10.0f);
++        i_Scp->mpTextBoxSdw->move(i_Scp->mpTextBoxSdw->getBounds().i.x, i_Scp->mpTextBoxSdw->getBounds().i.y - 10.0f);
++    }
++}
++else {
++    if (dComIfGs_getOptRuby()) {
++        i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 4.0f);
++        i_Scp->mpTextBoxSdw->move(i_Scp->mpTextBoxSdw->getBounds().i.x, i_Scp->mpTextBoxSdw->getBounds().i.y - 4.0f);
++    }
++}
++#else
+ #if VERSION == VERSION_PAL
+     if (dComIfGs_getOptRuby()) {
+         i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 14.0f);
+@@ -199,6 +251,7 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+         i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 4.0f);
+         i_Scp->mpTextBoxSdw->move(i_Scp->mpTextBoxSdw->getBounds().i.x, i_Scp->mpTextBoxSdw->getBounds().i.y - 4.0f);
+     }
++#endif
+ #endif
+ 
+     i_Scp->mpRubyBox->move(i_Scp->mpRubyBox->getBounds().i.x, i_Scp->mpRubyBox->getBounds().i.y - 3.0f);
+diff --git a/game/src/m_Do/m_Do_MemCardRWmng.cpp b/game/src/m_Do/m_Do_MemCardRWmng.cpp
+index 2b4f389a..88b5524f 100644
+--- a/game/src/m_Do/m_Do_MemCardRWmng.cpp
++++ b/game/src/m_Do/m_Do_MemCardRWmng.cpp
+@@ -54,10 +54,19 @@ s32 mDoMemCdRWm_Store(CARDFileInfo* card, void* data, u32 size) {
+     card_savedata* save = (card_savedata*)sTmpBuf;
+     save->data_version = 0;
+     memcpy(save->gamedata, data, size);
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++    save->save_count = ++sSaveCount;
++}
++else {
++    save->save_count = dComIfGs_getPalLanguage();
++}
++#else
+ #if VERSION != VERSION_PAL
+     save->save_count = ++sSaveCount;
+ #else
+     save->save_count = dComIfGs_getPalLanguage();
++#endif
+ #endif
+     s32 csum = mDoMemCdRWm_CalcCheckSum(save, sizeof(card_savedata) - sizeof(save->csum));
+     save->csum = csum;
+@@ -166,6 +175,23 @@ s32 mDoMemCdRWm_Restore(CARDFileInfo* card, void* dst, u32 size) {
+     }
+ 
+     memcpy(dst, save->gamedata, size);
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++    sSaveCount = save->save_count;
++}
++else {
++    if (save->save_count > 4) {
++        g_mDoMemCd_control.field_0x165B = 0;
++    } else {
++        // TODO: does save->save_count have the language index in it on PAL?
++        g_mDoMemCd_control.field_0x165B = save->save_count;
++    }
++#if TARGET_PC
++    // SwitchWaker: a language chosen in the options menu wins over the save's (pc_language.cpp)
++    g_mDoMemCd_control.field_0x165B = pc_card_pal_language(g_mDoMemCd_control.field_0x165B);
++#endif
++}
++#else
+ #if VERSION != VERSION_PAL
+     sSaveCount = save->save_count;
+ #else
+@@ -179,6 +205,7 @@ s32 mDoMemCdRWm_Restore(CARDFileInfo* card, void* dst, u32 size) {
+     // SwitchWaker: a language chosen in the options menu wins over the save's (pc_language.cpp)
+     g_mDoMemCd_control.field_0x165B = pc_card_pal_language(g_mDoMemCd_control.field_0x165B);
+ #endif
++#endif
+ #endif
+     mDoMemCd_setDataVersion(save->data_version);
+     if (!invalid && mDoMemCd_getPictDataPtr() != NULL) {
+diff --git a/game/src/m_Do/m_Do_gba_com.cpp b/game/src/m_Do/m_Do_gba_com.cpp
+index f15ea209..b8587de0 100644
+--- a/game/src/m_Do/m_Do_gba_com.cpp
++++ b/game/src/m_Do/m_Do_gba_com.cpp
+@@ -458,7 +458,7 @@ void mDoGaC_agbCom_c::mDoGaC_CodeExchange0() {
+ void mDoGaC_agbCom_c::mDoGaC_CodeExchange1() {
+     u8 sp8[16];
+     if (!JUTGba::getManager()->resultRead(mDoGaC_getPortNo(), sp8)) {
+-        if (field_0x118 == *(u32*) VERSION_SELECT("GZLJ", "GZLJ", "GZLE", "GZLP")) {
++        if (field_0x118 == *(u32*) REGION_SELECT("GZLE", "GZLP")) {
+             JUTGba::getManager()->doGetStatus(mDoGaC_getPortNo(), CodeExchange_2, NULL);
+         } else {
+             mDoGaC_GbaReboot();
+@@ -472,7 +472,7 @@ void mDoGaC_agbCom_c::mDoGaC_CodeExchange1() {
+ void mDoGaC_agbCom_c::mDoGaC_CodeExchange2() {
+     u8 sp8[16];
+     if (!JUTGba::getManager()->resultGetStatus(mDoGaC_getPortNo(), sp8) && sp8[0] == 0x20) {
+-        field_0x114 = *(u32*) VERSION_SELECT("GZLJ", "GZLJ", "GZLE", "GZLP");
++        field_0x114 = *(u32*) REGION_SELECT("GZLE", "GZLP");
+         JUTGba::getManager()->doWrite(mDoGaC_getPortNo(), (u8*)&field_0x114, CodeExchange_3, NULL);
+     } else {
+         field_0x2 = 0;
+diff --git a/native/include/pc/pc_game_id.h b/native/include/pc/pc_game_id.h
+index 66f2d7d6..43679b91 100644
+--- a/native/include/pc/pc_game_id.h
++++ b/native/include/pc/pc_game_id.h
+@@ -14,12 +14,27 @@
+ #define COS_GAME_ID_STR "GZLE01"
+ #endif
+ 
++#if COS_RUNTIME_REGION
++#include "pc/pc_disc_region.h"
++#define PC_ACTIVE_GAME_ID (pc_disc_game_id())
++#else
++#define PC_ACTIVE_GAME_ID COS_GAME_ID_STR
++#endif
++
++#if COS_RUNTIME_REGION
++#define PC_SUPPORTED_REGION_EN "USA or Europe"
++#define PC_SUPPORTED_GAME_IDS "GZLE01 or GZLP01"
++#else
++#define PC_SUPPORTED_REGION_EN PC_GAME_REGION_EN
++#define PC_SUPPORTED_GAME_IDS COS_GAME_ID_STR
++#endif
++
+ /* The other supported disc, for the message that names the right build. */
+ #define PC_GAME_ID_USA "GZLE01"
+ #define PC_GAME_ID_EUR "GZLP01"
+ 
+ /* The disc's region as the messages name it, the expected image's file name, the build's NRO. */
+-#define PC_GAME_IS_EUR (COS_GAME_ID_STR[3] == 'P')
++#define PC_GAME_IS_EUR (PC_ACTIVE_GAME_ID[3] == 'P')
+ #define PC_GAME_REGION_EN (PC_GAME_IS_EUR ? "Europe" : "USA")
+ #define PC_GAME_REGION_ES (PC_GAME_IS_EUR ? "Europa" : "EE. UU.")
+ #define PC_GAME_ISO_NAME COS_GAME_ID_STR ".iso"
+diff --git a/native/src/pc/runtime/pc_assets.cpp b/native/src/pc/runtime/pc_assets.cpp
+index 9749716a..e9f0fe2a 100644
+--- a/native/src/pc/runtime/pc_assets.cpp
++++ b/native/src/pc/runtime/pc_assets.cpp
+@@ -20,6 +20,9 @@
+ #include "pc_internal.h"
+ 
+ #include "pc/pc_game_id.h"
++#if COS_RUNTIME_REGION
++#include "pc/pc_disc_region.h"
++#endif
+ 
+ #include "cos_sdk/host_alloc.h"
+ 
+@@ -51,12 +54,28 @@ struct Row {
+     const char* sha1; // of the decompressed main.dol or REL
+ };
+ 
++#if COS_RUNTIME_REGION
++const Row kUsRows[] = {
++#define COS_ASSET_ROW(name, file, arc, section, offset, size, kind, sha) {name, file, arc, section, offset, size, kind, sha},
++#include "assets/cos_asset_table_us.inc"
++#undef COS_ASSET_ROW
++};
++const Row kPalRows[] = {
++#define COS_ASSET_ROW(name, file, arc, section, offset, size, kind, sha) {name, file, arc, section, offset, size, kind, sha},
++#include "assets/cos_asset_table_pal.inc"
++#undef COS_ASSET_ROW
++};
++static_assert(sizeof(kUsRows) == sizeof(kPalRows));
++#define kRows (pc_disc_is_pal() ? kPalRows : kUsRows)
++constexpr uint32_t kRowCount = sizeof(kPalRows) / sizeof(kPalRows[0]);
++#else
+ const Row kRows[] = {
+ #define COS_ASSET_ROW(name, file, arc, section, offset, size, kind, sha) {name, file, arc, section, offset, size, kind, sha},
+ #include "assets/cos_asset_table.inc"
+ #undef COS_ASSET_ROW
+ };
+ constexpr uint32_t kRowCount = sizeof(kRows) / sizeof(kRows[0]);
++#endif
+ 
+ struct Pending {
+     void* array;
+@@ -91,7 +110,7 @@ void discError(const char* fmt, ...) {
+     va_start(ap, fmt);
+     vsnprintf(text, sizeof text, fmt, ap);
+     va_end(ap);
+-    pc::discMessage("%s (the game's data arrays come from the " COS_GAME_ID_STR " revision 0 disc)", text);
++    pc::discMessage("%s (the game's data arrays come from the %s revision 0 disc)", text, PC_ACTIVE_GAME_ID);
+     pc::exitDisc();
+ }
+ 
+@@ -311,10 +330,18 @@ void loadAssets() {
+     cos_sdk::HostVector<uint8_t> container, rel;
+     for (uint32_t i = 0; i < kRowCount; i++) {
+         const Row& r = kRows[i];
++#if COS_RUNTIME_REGION
++        if (!r.sha1[0]) {
++            // PAL-only language arrays have no source on a US disc. They are
++            // never selected there; retain their canonical registration slots.
++            st.data[i].assign(r.size, 0);
++            continue;
++        }
++#endif
+         const uint8_t* src;
+         if (r.file[0] == '\0') {
+             if (!dolChecked) {
+-                if (!sha1Is(dol, (size_t)dolLen, r.sha1)) discError("main.dol is not " COS_GAME_ID_STR " revision 0's (SHA-1)");
++                if (!sha1Is(dol, (size_t)dolLen, r.sha1)) discError("main.dol is not %s revision 0's (SHA-1)", PC_ACTIVE_GAME_ID);
+                 dolChecked = true;
+             }
+             src = dolBytes(dol, (size_t)dolLen, r.offset, r.size);
+@@ -330,7 +357,7 @@ void loadAssets() {
+                     rel = container;
+                 }
+                 if (!sha1Is(rel.data(), rel.size(), r.sha1))
+-                    discError("%s%s%s is not " COS_GAME_ID_STR " revision 0's (SHA-1)", r.file, r.arcFile[0] ? ":" : "", r.arcFile);
++                    discError("%s%s%s is not %s revision 0's (SHA-1)", r.file, r.arcFile[0] ? ":" : "", r.arcFile, PC_ACTIVE_GAME_ID);
+                 curFile = r.file;
+                 curArc = r.arcFile;
+             }

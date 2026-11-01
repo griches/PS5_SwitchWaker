@@ -1,0 +1,2370 @@
+diff --git a/game/include/d/d_name.h b/game/include/d/d_name.h
+index 438ad8ae..b09579d6 100644
+--- a/game/include/d/d_name.h
++++ b/game/include/d/d_name.h
+@@ -102,6 +102,9 @@ public:
+ #endif
+         MENU_BACKSPACE,
+         MENU_END,
++#if COS_RUNTIME_REGION
++        MENU_EIGO, // US alphabet; PAL keeps its existing menu indices.
++#endif
+ 
+         MENU_MAX = 5,
+     };
+diff --git a/game/src/d/d_file_error.cpp b/game/src/d/d_file_error.cpp
+index c2a639e0..76b39e3c 100644
+--- a/game/src/d/d_file_error.cpp
++++ b/game/src/d/d_file_error.cpp
+@@ -25,6 +25,16 @@ dFe_HIO_c::dFe_HIO_c() {
+     m10 = -5;
+     m12 = VERSION_SELECT(5, 5, 0, 0);
+ 
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++    m14[0] = 1.4f;
++    m14[1] = 1.1f;
++}
++else {
++    m14[0] = 1.8f;
++    m14[1] = 2.5f;
++}
++#else
+ #if VERSION == VERSION_USA
+     m14[0] = 1.4f;
+     m14[1] = 1.1f;
+@@ -32,6 +42,7 @@ dFe_HIO_c::dFe_HIO_c() {
+     m14[0] = 1.8f;
+     m14[1] = 2.5f;
+ #endif
++#endif
+ }
+ 
+ /* 8017DBA8-8017DDEC       .text _create__13dFile_error_cFv */
+@@ -101,7 +112,7 @@ void dFile_error_c::setErrMessage(u32 msgNo, int param_2) {
+ 
+     m300 -= msgPanes[0].mPosTopLeft.y;
+ 
+-    if (line_count > VERSION_SELECT(7, 7, 7, 10)) {
++    if (line_count > REGION_SELECT(7, 10)) {
+         m300 += 20.0f;
+     }
+ 
+@@ -214,9 +225,11 @@ void dFile_error_c::setMessage(char* message) {
+ 
+     *own_message = '\0';
+ 
+-#if VERSION == VERSION_PAL
+-    if (*(own_message - 1) == ' ') {
+-        *(own_message - 1) = '\0';
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        if (*(own_message - 1) == ' ') {
++            *(own_message - 1) = '\0';
++        }
+     }
+ #endif
+ }
+@@ -667,43 +680,45 @@ void dFile_error_c::paneTransInit() {
+ 
+ /* 8017F3E0-8017F3FC       .text displayInit__13dFile_error_cFv */
+ void dFile_error_c::displayInit() {
+-#if VERSION == VERSION_PAL
+-    switch(dComIfGs_getPalLanguage()) {
+-        case 0:
+-            curxp[0] = 265.0f;
+-            curxp[1] = 345.0f;
+-
+-            g_feHIO.m14[0] = 1.4f;
+-            g_feHIO.m14[1] = 1.1f;
+-            break;
+-        case 1:
+-            curxp[0] = 255.0f;
+-            curxp[1] = 338.0f;
+-
+-            g_feHIO.m14[0] = 1.1f;
+-            g_feHIO.m14[1] = 1.6f;
+-            break;
+-        case 2:
+-            curxp[0] = 259.0f;
+-            curxp[1] = 344.0f;
+-
+-            g_feHIO.m14[0] = 1.4f;
+-            g_feHIO.m14[1] = 1.5f;
+-            break;
+-        case 3:
+-            curxp[0] = 265.0f;
+-            curxp[1] = 337.0f;
+-
+-            g_feHIO.m14[0] = 1.1f;
+-            g_feHIO.m14[1] = 1.1f;
+-            break;
+-        case 4:
+-            curxp[0] = 265.0f;
+-            curxp[1] = 337.0f;
+-
+-            g_feHIO.m14[0] = 1.1f;
+-            g_feHIO.m14[1] = 1.1f;
+-            break;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        switch(dComIfGs_getPalLanguage()) {
++            case 0:
++                curxp[0] = 265.0f;
++                curxp[1] = 345.0f;
++
++                g_feHIO.m14[0] = 1.4f;
++                g_feHIO.m14[1] = 1.1f;
++                break;
++            case 1:
++                curxp[0] = 255.0f;
++                curxp[1] = 338.0f;
++
++                g_feHIO.m14[0] = 1.1f;
++                g_feHIO.m14[1] = 1.6f;
++                break;
++            case 2:
++                curxp[0] = 259.0f;
++                curxp[1] = 344.0f;
++
++                g_feHIO.m14[0] = 1.4f;
++                g_feHIO.m14[1] = 1.5f;
++                break;
++            case 3:
++                curxp[0] = 265.0f;
++                curxp[1] = 337.0f;
++
++                g_feHIO.m14[0] = 1.1f;
++                g_feHIO.m14[1] = 1.1f;
++                break;
++            case 4:
++                curxp[0] = 265.0f;
++                curxp[1] = 337.0f;
++
++                g_feHIO.m14[0] = 1.1f;
++                g_feHIO.m14[1] = 1.1f;
++                break;
++        }
+     }
+ #endif
+ 
+diff --git a/game/src/d/d_menu_fmap.cpp b/game/src/d/d_menu_fmap.cpp
+index c8cc92bc..65b5e8b9 100644
+--- a/game/src/d/d_menu_fmap.cpp
++++ b/game/src/d/d_menu_fmap.cpp
+@@ -573,40 +573,42 @@ void dMenu_Fmap_c::screenSet() {
+     ((J2DTextBox*)mWt0Pane.pane)->setWhite(JUtility::TColor(0xffffffff));
+ #endif
+ 
+-#if VERSION == VERSION_PAL
+-    J2DPicture* kzmW = (J2DPicture*)fmapDl.scrn->search('kzmW');
+-    J2DPicture* kzmE = (J2DPicture*)fmapDl.scrn->search('kzmE');
+-    char yestxt[4];
+-    switch (dComIfGs_getPalLanguage()) {
+-        case 0:
+-            ((J2DTextBox*)mYesPane.pane)->setString("Yes");
+-            ((J2DTextBox*)mNoPane.pane)->setString("No");
+-            break;
+-        case 1:
+-            ((J2DTextBox*)mYesPane.pane)->setString("Ja");
+-            ((J2DTextBox*)mNoPane.pane)->setString("Nein");
+-            kzmE->changeTexture("f_w_o_big.bti", 0);
+-            break;
+-        case 2:
+-            ((J2DTextBox*)mYesPane.pane)->setString("Oui");
+-            ((J2DTextBox*)mNoPane.pane)->setString("Non");
+-            kzmW->changeTexture("f_w_o_big.bti", 0);
+-            break;
+-        case 3: {
+-            strcpy(yestxt, "Si");
+-            yestxt[1] = 0xED; // Sí
+-            ((J2DTextBox*)mYesPane.pane)->setString(yestxt);
+-            ((J2DTextBox*)mNoPane.pane)->setString("No");
+-            kzmW->changeTexture("f_w_o_big.bti", 0);
+-            break;
+-        }
+-        case 4: {
+-            strcpy(yestxt, "Si");
+-            yestxt[1] = 0xEC; // Sì
+-            ((J2DTextBox*)mYesPane.pane)->setString(yestxt);
+-            ((J2DTextBox*)mNoPane.pane)->setString("No");
+-            kzmW->changeTexture("f_w_o_big.bti", 0);
+-            break;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        J2DPicture* kzmW = (J2DPicture*)fmapDl.scrn->search('kzmW');
++        J2DPicture* kzmE = (J2DPicture*)fmapDl.scrn->search('kzmE');
++        char yestxt[4];
++        switch (dComIfGs_getPalLanguage()) {
++            case 0:
++                ((J2DTextBox*)mYesPane.pane)->setString("Yes");
++                ((J2DTextBox*)mNoPane.pane)->setString("No");
++                break;
++            case 1:
++                ((J2DTextBox*)mYesPane.pane)->setString("Ja");
++                ((J2DTextBox*)mNoPane.pane)->setString("Nein");
++                kzmE->changeTexture("f_w_o_big.bti", 0);
++                break;
++            case 2:
++                ((J2DTextBox*)mYesPane.pane)->setString("Oui");
++                ((J2DTextBox*)mNoPane.pane)->setString("Non");
++                kzmW->changeTexture("f_w_o_big.bti", 0);
++                break;
++            case 3: {
++                strcpy(yestxt, "Si");
++                yestxt[1] = 0xED; // Sí
++                ((J2DTextBox*)mYesPane.pane)->setString(yestxt);
++                ((J2DTextBox*)mNoPane.pane)->setString("No");
++                kzmW->changeTexture("f_w_o_big.bti", 0);
++                break;
++            }
++            case 4: {
++                strcpy(yestxt, "Si");
++                yestxt[1] = 0xEC; // Sì
++                ((J2DTextBox*)mYesPane.pane)->setString(yestxt);
++                ((J2DTextBox*)mNoPane.pane)->setString("No");
++                kzmW->changeTexture("f_w_o_big.bti", 0);
++                break;
++            }
+         }
+     }
+ #endif
+diff --git a/game/src/d/d_menu_fmap2.cpp b/game/src/d/d_menu_fmap2.cpp
+index ea0117d5..1c8cc9cd 100644
+--- a/game/src/d/d_menu_fmap2.cpp
++++ b/game/src/d/d_menu_fmap2.cpp
+@@ -379,36 +379,38 @@ void dMenu_Fmap2_c::screenSet() {
+         field_0x27c0[i] = ((J2DTextBox*)field_0xe1c[i].pane)->getStringPtr();
+         field_0x27c0[i][0] = 0;
+     }
+-#if VERSION == VERSION_PAL
+-    f32 nameSizeX;
+-    f32 textSizeX;
+-    switch (dComIfGs_getPalLanguage()) {
+-    case 0:
+-        nameSizeX = 23.0f;
+-        textSizeX = 20.0f;
+-        break;
+-    case 1:
+-        nameSizeX = 23.0f;
+-        textSizeX = 19.0f;
+-        break;
+-    case 2:
+-        nameSizeX = 18.0f;
+-        textSizeX = 18.0f;
+-        break;
+-    case 3:
+-        nameSizeX = 18.0f;
+-        textSizeX = 19.0f;
+-        break;
+-    case 4:
+-        nameSizeX = 19.0f;
+-        textSizeX = 18.0f;
+-        break;
+-    }
+-    for (i = 0; i < 4; i++) {
+-        ((J2DTextBox*)field_0x1484[i].pane)->setFontSize(nameSizeX, 27.0f);
+-    }
+-    for (i = 0; i < 2; i++) {
+-        ((J2DTextBox*)field_0xe1c[i].pane)->setFontSize(textSizeX, 26.0f);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        f32 nameSizeX;
++        f32 textSizeX;
++        switch (dComIfGs_getPalLanguage()) {
++        case 0:
++            nameSizeX = 23.0f;
++            textSizeX = 20.0f;
++            break;
++        case 1:
++            nameSizeX = 23.0f;
++            textSizeX = 19.0f;
++            break;
++        case 2:
++            nameSizeX = 18.0f;
++            textSizeX = 18.0f;
++            break;
++        case 3:
++            nameSizeX = 18.0f;
++            textSizeX = 19.0f;
++            break;
++        case 4:
++            nameSizeX = 19.0f;
++            textSizeX = 18.0f;
++            break;
++        }
++        for (i = 0; i < 4; i++) {
++            ((J2DTextBox*)field_0x1484[i].pane)->setFontSize(nameSizeX, 27.0f);
++        }
++        for (i = 0; i < 2; i++) {
++            ((J2DTextBox*)field_0xe1c[i].pane)->setFontSize(textSizeX, 26.0f);
++        }
+     }
+ #endif
+ }
+diff --git a/game/src/d/d_menu_save.cpp b/game/src/d/d_menu_save.cpp
+index 6d753c37..c65ec3eb 100644
+--- a/game/src/d/d_menu_save.cpp
++++ b/game/src/d/d_menu_save.cpp
+@@ -983,12 +983,14 @@ void dMenu_save_c::memCardDataSaveUpMenu() {
+ void dMenu_save_c::memCardDataSaveSel() {
+     if (YesNoSelect(0) != 0) {
+         if (field_0x52f == 0) {
+-            #if VERSION == VERSION_PAL
+-            if (mDoMemCd_getStatus(0) != 2) {
+-                proc = PROC_MEMCARD_CHECK;
+-                return;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++            if (REGION_PAL) {
++                if (mDoMemCd_getStatus(0) != 2) {
++                    proc = PROC_MEMCARD_CHECK;
++                    return;
++                }
+             }
+-            #endif
++#endif
+             proc = PROC_MEMCARD_DATA_SAVE_DOWN_MENU;
+         } else {
+             CursorAlphaInit();
+@@ -1566,9 +1568,11 @@ void dMenu_save_c::screenSet() {
+     ((J2DTextBox*)field_0x20c[3].pane)->setFont(MenuSave.font);
+     ((J2DTextBox*)field_0x20c[4].pane)->setFont(MenuSave.font);
+ 
+-#if VERSION == VERSION_PAL
+-    ((J2DTextBox*)field_0x20c[3].pane)->setLineSpace(28.0f);
+-    ((J2DTextBox*)field_0x20c[4].pane)->setLineSpace(28.0f);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        ((J2DTextBox*)field_0x20c[3].pane)->setLineSpace(28.0f);
++        ((J2DTextBox*)field_0x20c[4].pane)->setLineSpace(28.0f);
++    }
+ #endif
+ 
+     char sp8[256];
+@@ -1588,8 +1592,10 @@ void dMenu_save_c::screenSet() {
+ 
+     fopMsgM_setPaneData(&field_0x324, MenuSave.Scr->search('tk00'));
+     fopMsgM_setPaneData(&field_0x35c, MenuSave.Scr->search('tl00'));
+-#if VERSION == VERSION_PAL
+-    fopMsgM_setPaneData(&field_0x51c_pal, MenuSave.Scr->search('tlsv'));
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        fopMsgM_setPaneData(&field_0x51c_pal, MenuSave.Scr->search('tlsv'));
++    }
+ #endif
+     fopMsgM_setPaneData(&field_0x394, MenuSave.Scr->search('cur1'));
+     fopMsgM_setPaneData(&field_0x3cc, MenuSave.Scr->search('ysk0'));
+@@ -1602,42 +1608,44 @@ void dMenu_save_c::screenSet() {
+     fopMsgM_setPaneData(&field_0x4e4, MenuSave.Scr->search('no'));
+     ((J2DTextBox*)field_0x4e4.pane)->setFont(MenuSave.font);
+ 
+-#if VERSION == VERSION_PAL
+-    char yestxt[4];
+-    switch (dComIfGs_getPalLanguage()) {
+-    case 0:
+-        ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save.bti", 0);
+-        ((J2DTextBox*)field_0x43c.pane)->setString("Yes");
+-        ((J2DTextBox*)field_0x4e4.pane)->setString("No");
+-        break;
+-    case 1:
+-        ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_gm.bti", 0);
+-        ((J2DTextBox*)field_0x43c.pane)->setString("Ja");
+-        ((J2DTextBox*)field_0x4e4.pane)->setString("Nein");
+-        break;
+-    case 2:
+-        ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_fr.bti", 0);
+-        ((J2DTextBox*)field_0x43c.pane)->setString("Oui");
+-        ((J2DTextBox*)field_0x4e4.pane)->setString("Non");
+-        break;
+-    case 3: {
+-        strcpy(yestxt, "Si");
+-        yestxt[1] = 0xED;
+-
+-        ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_sp.bti", 0);
+-        ((J2DTextBox*)field_0x43c.pane)->setString(yestxt);
+-        ((J2DTextBox*)field_0x4e4.pane)->setString("No");
+-        break;
+-    }
+-    case 4: {
+-        strcpy(yestxt, "Si");
+-        yestxt[1] = 0xEC;
+-
+-        ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_it.bti", 0);
+-        ((J2DTextBox*)field_0x43c.pane)->setString(yestxt);
+-        ((J2DTextBox*)field_0x4e4.pane)->setString("No");
+-        break;
+-    }
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        char yestxt[4];
++        switch (dComIfGs_getPalLanguage()) {
++        case 0:
++            ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save.bti", 0);
++            ((J2DTextBox*)field_0x43c.pane)->setString("Yes");
++            ((J2DTextBox*)field_0x4e4.pane)->setString("No");
++            break;
++        case 1:
++            ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_gm.bti", 0);
++            ((J2DTextBox*)field_0x43c.pane)->setString("Ja");
++            ((J2DTextBox*)field_0x4e4.pane)->setString("Nein");
++            break;
++        case 2:
++            ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_fr.bti", 0);
++            ((J2DTextBox*)field_0x43c.pane)->setString("Oui");
++            ((J2DTextBox*)field_0x4e4.pane)->setString("Non");
++            break;
++        case 3: {
++            strcpy(yestxt, "Si");
++            yestxt[1] = 0xED;
++
++            ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_sp.bti", 0);
++            ((J2DTextBox*)field_0x43c.pane)->setString(yestxt);
++            ((J2DTextBox*)field_0x4e4.pane)->setString("No");
++            break;
++        }
++        case 4: {
++            strcpy(yestxt, "Si");
++            yestxt[1] = 0xEC;
++
++            ((J2DPicture*)field_0x51c_pal.pane)->changeTexture("title_save_it.bti", 0);
++            ((J2DTextBox*)field_0x43c.pane)->setString(yestxt);
++            ((J2DTextBox*)field_0x4e4.pane)->setString("No");
++            break;
++        }
++        }
+     }
+ #endif
+ }
+diff --git a/game/src/d/d_name.cpp b/game/src/d/d_name.cpp
+index 09a2138e..d1a7f1fc 100644
+--- a/game/src/d/d_name.cpp
++++ b/game/src/d/d_name.cpp
+@@ -26,12 +26,23 @@ dNm_HIO_c::dNm_HIO_c() {
+     field_0x11 = 0;
+     field_0x12 = 2;
+     field_0x13 = 4;
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++    field_0x14 = 4;
++    field_0x15 = 6;
++}
++else {
++    field_0x14 = 6;
++    field_0x15 = 8;
++}
++#else
+ #if VERSION == VERSION_USA
+     field_0x14 = 4;
+     field_0x15 = 6;
+ #else
+     field_0x14 = 6;
+     field_0x15 = 8;
++#endif
+ #endif
+     field_0x1f = 14;
+     field_0x20 = 140;
+@@ -152,6 +163,21 @@ void dName_c::playNameSet(int nameLength) {
+     char* str = inputStr;
+ 
+     for (int i = 0; i < nameLength; i++) {
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++        if (chrInfo[i].set == MOJI_EIGO) {
++            *str = chrInfo[i].character;
++            str += 1;
++        } else {
++            *(u16*)str = chrInfo[i].character;
++            str += 2;
++        }
++}
++else {
++        *str = chrInfo[i].character;
++        str += 1;
++}
++#else
+ #if VERSION <= VERSION_USA
+         if (chrInfo[i].set == MOJI_EIGO) {
+             *str = chrInfo[i].character;
+@@ -163,6 +189,7 @@ void dName_c::playNameSet(int nameLength) {
+ #else
+         *str = chrInfo[i].character;
+         str += 1;
++#endif
+ #endif
+     }
+ 
+@@ -177,7 +204,7 @@ bool dName_c::_open() {
+     BOOL base_rt = PaneTranceBase(paneTransTimer - g_nmHIO.field_0x10, g_nmHIO.field_0x8, g_nmHIO.field_0x46, 0.0f, 1, 0);
+     BOOL kata_rt = PaneTranceKata(paneTransTimer - g_nmHIO.field_0x12, g_nmHIO.field_0xa, g_nmHIO.field_0x48, 0.0f, 1, 0);
+     BOOL hira_rt = PaneTranceHira(paneTransTimer - g_nmHIO.field_0x11, g_nmHIO.field_0x9, g_nmHIO.field_0x48, 0.0f, 1, 0);
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     BOOL eisu_rt = PaneTranceEisu(paneTransTimer - g_nmHIO.field_0x13, g_nmHIO.field_0xb, g_nmHIO.field_0x48, 0.0f, 1, 0);
+ #endif
+     BOOL arw_rt = PaneTranceArrow(paneTransTimer - g_nmHIO.field_0x14, g_nmHIO.field_0xc, g_nmHIO.field_0x48, 0.0f, 1, 0);
+@@ -191,7 +218,7 @@ bool dName_c::_open() {
+         && base_rt == TRUE
+         && kata_rt == TRUE
+         && hira_rt == TRUE
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+         && eisu_rt == TRUE
+ #endif
+         && arw_rt == TRUE
+@@ -212,7 +239,7 @@ bool dName_c::_close() {
+     BOOL base_rt = PaneTranceBase(paneTransTimer - g_nmHIO.field_0x10, g_nmHIO.field_0x8, 0.0f, g_nmHIO.field_0x46, 0, 1);
+     BOOL kata_rt = PaneTranceKata(paneTransTimer - g_nmHIO.field_0x12, g_nmHIO.field_0xa, 0.0f, g_nmHIO.field_0x48, 0, 1);
+     BOOL hira_rt = PaneTranceHira(paneTransTimer - g_nmHIO.field_0x11, g_nmHIO.field_0x9, 0.0f, g_nmHIO.field_0x48, 0, 1);
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     BOOL eisu_rt = PaneTranceEisu(paneTransTimer - g_nmHIO.field_0x13, g_nmHIO.field_0xb, 0.0f, g_nmHIO.field_0x48, 0, 1);
+ #endif
+     BOOL arw_rt = PaneTranceArrow(paneTransTimer - g_nmHIO.field_0x14, g_nmHIO.field_0xc, 0.0f, g_nmHIO.field_0x48, 0, 1);
+@@ -226,7 +253,7 @@ bool dName_c::_close() {
+         && base_rt == TRUE
+         && kata_rt == TRUE
+         && hira_rt == TRUE
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+         && eisu_rt == TRUE
+ #endif
+         && arw_rt == TRUE
+@@ -243,6 +270,21 @@ void dName_c::NameInMain() {
+     stick->checkTrigger();
+     (this->*SelProc[selProc])();
+ 
++#if COS_RUNTIME_REGION
++    if (REGION_PAL && CPad_CHECK_TRIG_Y(0)) {
++        mDoAud_seStart(JA_SE_NAME_PUSH_BUTTON, NULL, 0, 0);
++        prevMojiSet = mojiSet;
++        mojiSet++;
++#if VERSION <= VERSION_JPN
++        if (mojiSet > MOJI_EIGO) {
++#else
++        if (mojiSet > MOJI_KATA) {
++#endif
++            mojiSet = MOJI_HIRA;
++        }
++        mojiListChange(prevMojiSet);
++    } else
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+     if (CPad_CHECK_TRIG_Y(0)) {
+         mDoAud_seStart(JA_SE_NAME_PUSH_BUTTON, NULL, 0, 0);
+@@ -258,6 +300,7 @@ void dName_c::NameInMain() {
+         mojiListChange(prevMojiSet);
+     } else
+ #endif
++#endif
+ 
+ #if VERSION <= VERSION_JPN
+     if (CPad_CHECK_TRIG_X(0)) {
+@@ -666,7 +709,7 @@ int dName_c::getMoji() {
+     case MOJI_KATA:
+         pane = &kataMojiPanes[charColumn];
+         break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MOJI_EIGO:
+         pane = &eisuMojiPanes[charColumn];
+         break;
+@@ -681,6 +724,33 @@ int dName_c::getMoji() {
+             continue;
+         }
+ 
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++        if (*(u8*)moji >> 4 == 0x8 || *(u8*)moji >> 4 == 0x9) {
++            if (i == charRow) {
++                result = *(u16*)moji;
++                break;
++            }
++            moji += 2;
++            i++;
++        } else {
++            if (i == charRow) {
++                result = *moji;
++                break;
++            }
++            moji++;
++            i++;
++        }
++}
++else {
++        if (i == charRow) {
++            result = *moji;
++            break;
++        }
++        moji++;
++        i++;
++}
++#else
+ #if VERSION <= VERSION_USA
+         if (*(u8*)moji >> 4 == 0x8 || *(u8*)moji >> 4 == 0x9) {
+             if (i == charRow) {
+@@ -704,6 +774,7 @@ int dName_c::getMoji() {
+         }
+         moji++;
+         i++;
++#endif
+ #endif
+     }
+ 
+@@ -747,10 +818,19 @@ void dName_c::setMoji(int moji) {
+                 chrInfo[curPos].row = charRow;
+                 chrInfo[curPos].set = mojiSet;
+                 chrInfo[curPos].field_0x3 = 1;
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++                chrInfo[curPos].character = moji;
++}
++else {
++                chrInfo[curPos].character = moji & 0xFF;
++}
++#else
+ #if VERSION <= VERSION_USA
+                 chrInfo[curPos].character = moji;
+ #else
+                 chrInfo[curPos].character = moji & 0xFF;
++#endif
+ #endif
+ 
+                 if (curPos != 8) {
+@@ -762,10 +842,19 @@ void dName_c::setMoji(int moji) {
+             chrInfo[curPos].row = charRow;
+             chrInfo[curPos].set = mojiSet;
+             chrInfo[curPos].field_0x3 = 1;
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++            chrInfo[curPos].character = moji;
++}
++else {
++            chrInfo[curPos].character = moji & 0xFF;
++}
++#else
+ #if VERSION <= VERSION_USA
+             chrInfo[curPos].character = moji;
+ #else
+             chrInfo[curPos].character = moji & 0xFF;
++#endif
+ #endif
+ 
+             if (curPos != 8) {
+@@ -842,6 +931,13 @@ void dName_c::nameCursorMove() {
+ /* 80217870-802179BC       .text selectCursorMove__7dName_cFv */
+ void dName_c::selectCursorMove() {
+     int idx;
++#if COS_RUNTIME_REGION
++    if (REGION_PAL && charColumn < 3) idx = MENU_HIRA;
++    else if (REGION_PAL && charColumn < 6) idx = MENU_KATA;
++    else if (REGION_PAL && charColumn < 8) idx = MENU_EIGO;
++    else if (charColumn < 10) idx = MENU_BACKSPACE;
++    else idx = MENU_END;
++#else
+ #if VERSION == VERSION_PAL
+     if (charColumn < 3) {
+         idx = 0;
+@@ -871,6 +967,7 @@ void dName_c::selectCursorMove() {
+         idx = 4;
+     }
+ 
++#endif
+ #endif
+ 
+     field_0x2ab0[idx][0] = charColumn;
+@@ -953,6 +1050,11 @@ void dName_c::selectCursorAnime() {
+ 
+ /* 80217D44-80217DC8       .text menuCursorPosSet__7dName_cFv */
+ void dName_c::menuCursorPosSet() {
++#if COS_RUNTIME_REGION
++    if (REGION_PAL && charColumn < 3) selMenu = MENU_HIRA;
++    else if (REGION_PAL && charColumn < 6) selMenu = MENU_KATA;
++    else
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+     if (charColumn < 3) {
+         selMenu = MENU_HIRA;
+@@ -965,6 +1067,7 @@ void dName_c::menuCursorPosSet() {
+     }
+ #endif
+     else
++#endif
+ #endif
+     if (charColumn < 10) {
+         selMenu = MENU_BACKSPACE;
+@@ -987,19 +1090,32 @@ void dName_c::MenuSelect() {
+         mDoAud_seStart(JA_SE_NAME_CURSOR, NULL, 0, 0);
+         selMenu++;
+         if (selMenu > MENU_END) {
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            selMenu = MENU_HIRA;
++}
++else {
++            selMenu = MENU_BACKSPACE;
++}
++#else
+             #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+             selMenu = MENU_HIRA;
+             #else
+             selMenu = MENU_BACKSPACE;
+             #endif
++#endif
+         }
+         menuCursorMove();
+     } else if (stick->checkLeftTrigger()) {
+         mDoAud_seStart(JA_SE_NAME_CURSOR, NULL, 0, 0);
++#if COS_RUNTIME_REGION
++        if (selMenu == (REGION_PAL ? MENU_HIRA : MENU_BACKSPACE))
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+         if (selMenu == MENU_HIRA)
+ #else
+         if (selMenu == MENU_BACKSPACE)
++#endif
+ #endif
+         {
+             selMenu = MENU_END;
+@@ -1055,7 +1171,7 @@ void dName_c::MenuButtonAnime() {
+     case MENU_KATA:
+         fopMsgM_paneTrans(&field_0x177c[0], 0.0f, field_0x2ac4);
+         break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MENU_EIGO:
+         fopMsgM_paneTrans(&field_0x13fc[0], 0.0f, field_0x2ac4);
+         break;
+@@ -1082,7 +1198,7 @@ void dName_c::menuAbtnSelect() {
+     switch (selMenu) {
+     case MENU_HIRA:
+     case MENU_KATA:
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MENU_EIGO:
+ #endif
+         if (selMenu != mojiSet) {
+@@ -1121,10 +1237,19 @@ void dName_c::backSpace() {
+         {
+             chrInfo[7].column = 7;
+             chrInfo[7].row = 1;
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            chrInfo[7].set = MOJI_HIRA;
++}
++else {
++            chrInfo[7].set = MOJI_EIGO;
++}
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+             chrInfo[7].set = MOJI_HIRA;
+ #else
+             chrInfo[7].set = MOJI_EIGO;
++#endif
+ #endif
+             chrInfo[7].field_0x3 = 1;
+ #if VERSION <= VERSION_JPN
+@@ -1138,10 +1263,19 @@ void dName_c::backSpace() {
+             }
+             chrInfo[7].column = 7;
+             chrInfo[7].row = 1;
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            chrInfo[7].set = MOJI_HIRA;
++}
++else {
++            chrInfo[7].set = MOJI_EIGO;
++}
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+             chrInfo[7].set = MOJI_HIRA;
+ #else
+             chrInfo[7].set = MOJI_EIGO;
++#endif
+ #endif
+             chrInfo[7].field_0x3 = 1;
+ #if VERSION <= VERSION_JPN
+@@ -1167,7 +1301,7 @@ void dName_c::mojiListChange(u8 i_prevSet) {
+     case MOJI_KATA:
+         prevMojiPanes = kataMojiPanes;
+         break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MOJI_EIGO:
+         prevMojiPanes = eisuMojiPanes;
+         break;
+@@ -1182,7 +1316,7 @@ void dName_c::mojiListChange(u8 i_prevSet) {
+     case MOJI_KATA:
+         newMojiPanes = kataMojiPanes;
+         break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MOJI_EIGO:
+         newMojiPanes = eisuMojiPanes;
+         break;
+@@ -1217,6 +1351,13 @@ void dName_c::menuCursorMove() {
+     }
+ 
+     static f32 PosData[] = {
++#if COS_RUNTIME_REGION
++        REGION_SELECT(-117.0f, -130.0f),
++        0.0f,
++        REGION_SELECT(194.0f, 130.0f),
++        REGION_SELECT(272.0f, 260.0f),
++        117.0f,
++#else
+     #if VERSION <= VERSION_USA
+         -117.0f,
+         0.0f,
+@@ -1229,6 +1370,7 @@ void dName_c::menuCursorMove() {
+         130.0f,
+         260.0f,
+     #endif
++#endif
+     };
+ 
+     switch (selMenu) {
+@@ -1239,7 +1381,7 @@ void dName_c::menuCursorMove() {
+ 
+         fopMsgM_paneTrans(&field_0x97c[0], PosData[selMenu], 0.0f);
+         break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MENU_EIGO:
+ #endif
+     case MENU_BACKSPACE:
+@@ -1247,15 +1389,17 @@ void dName_c::menuCursorMove() {
+         ((J2DPicture*)field_0x97c[3].pane)->setMirror((J2DMirror)0);
+ 
+         fopMsgM_paneTrans(&field_0x97c[0], PosData[selMenu], 0.0f);
+-#if VERSION <= VERSION_USA
+-        fopMsgM_paneScaleX(&field_0x97c[1], 0.45f);
+-        fopMsgM_paneScaleX(&field_0x97c[3], 0.45f);
+-        fopMsgM_paneScaleX(&field_0x97c[4], 0.45f);
+-
+-        field_0x97c[1].pane->move(field_0x97c[0].mSizeOrig.x, field_0x97c[1].mPosTopLeft.y);
+-        field_0x97c[3].pane->move(field_0x97c[0].mSizeOrig.x, field_0x97c[3].mPosTopLeft.y);
+-        field_0x97c[4].pane->move(field_0x97c[0].mSizeOrig.x, field_0x97c[4].mPosTopLeft.y);
+-        field_0x97c[2].pane->move(field_0x97c[0].mSizeOrig.x + field_0x97c[1].mSize.x, field_0x97c[2].mPosTopLeft.y);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            fopMsgM_paneScaleX(&field_0x97c[1], 0.45f);
++            fopMsgM_paneScaleX(&field_0x97c[3], 0.45f);
++            fopMsgM_paneScaleX(&field_0x97c[4], 0.45f);
++
++            field_0x97c[1].pane->move(field_0x97c[0].mSizeOrig.x, field_0x97c[1].mPosTopLeft.y);
++            field_0x97c[3].pane->move(field_0x97c[0].mSizeOrig.x, field_0x97c[3].mPosTopLeft.y);
++            field_0x97c[4].pane->move(field_0x97c[0].mSizeOrig.x, field_0x97c[4].mPosTopLeft.y);
++            field_0x97c[2].pane->move(field_0x97c[0].mSizeOrig.x + field_0x97c[1].mSize.x, field_0x97c[2].mPosTopLeft.y);
++        }
+ #endif
+         break;
+     case MENU_END:
+@@ -1290,7 +1434,7 @@ void dName_c::selectCursorPosSet(int row) {
+         case MENU_KATA:
+             charColumn = 3;
+             break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+         case MENU_EIGO:
+             charColumn = 6;
+             break;
+@@ -1348,15 +1492,17 @@ void dName_c::screenSet() {
+     fopMsgM_setPaneData(&field_0x14, nameIn.NameInScr->search('cc00'));
+ 
+     for (i = 0; i < 13; i++) {
+-#if VERSION <= VERSION_USA
+-        static u32 l_Eisu[] = {
+-            'ena', 'enb', 'enc',
+-            'end', 'ene', 'enf',
+-            'eng', 'enh', 'eni',
+-            'enj', 'enk', 'enl',
+-            'enm',
+-        };
+-        fopMsgM_setPaneData(&eisuMojiPanes[i], nameIn.NameInScr->search(l_Eisu[i]));
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            static u32 l_Eisu[] = {
++                'ena', 'enb', 'enc',
++                'end', 'ene', 'enf',
++                'eng', 'enh', 'eni',
++                'enj', 'enk', 'enl',
++                'enm',
++            };
++            fopMsgM_setPaneData(&eisuMojiPanes[i], nameIn.NameInScr->search(l_Eisu[i]));
++        }
+ #endif
+ 
+         static u32 l_Kata[] = {
+@@ -1377,47 +1523,51 @@ void dName_c::screenSet() {
+         };
+         fopMsgM_setPaneData(&hiraMojiPanes[i], nameIn.NameInScr->search(l_Hira[i]));
+ 
+-#if VERSION <= VERSION_USA
+-        ((J2DTextBox*)eisuMojiPanes[i].pane)->setFont(nameIn.font);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            ((J2DTextBox*)eisuMojiPanes[i].pane)->setFont(nameIn.font);
++        }
+ #endif
+         ((J2DTextBox*)kataMojiPanes[i].pane)->setFont(nameIn.font);
+         ((J2DTextBox*)hiraMojiPanes[i].pane)->setFont(nameIn.font);
+ 
+-#if VERSION == VERSION_PAL
+-        static char str01[13][10] = {
+-            "A\nN\n\xC0\n\xCF\n1",
+-            "B\nO\n\xC1\n\xD0\n2",
+-            "C\nP\n\xC2\n\xD1\n3",
+-            "D\nQ\n\xC4\n\xD2\n4",
+-            "E\nR\n\xC6\n\xD3\n5",
+-            "F\nS\n\xC7\n\xD4\n6",
+-            "G\nT\n\xC8\n\xD6\n7",
+-            "H\nU\n\xC9\n\x8C\n8",
+-            "I\nV\n\xCA\n\xD9\n9",
+-            "J\nW\n\xCB\n\xDA\n0",
+-            "K\nX\n\xCC\n\xDB\n,",
+-            "L\nY\n\xCD\n\xDC\n.",
+-            "M\nZ\n\xCE\n-\n ",
+-        };
+-
+-        static char str02[13][10] = {
+-            "a\nn\n\xE0\n\xEF\n1",
+-            "b\no\n\xE1\n\xF0\n2",
+-            "c\np\n\xE2\n\xF1\n3",
+-            "d\nq\n\xE4\n\xF2\n4",
+-            "e\nr\n\xE6\n\xF3\n5",
+-            "f\ns\n\xE7\n\xF4\n6",
+-            "g\nt\n\xE8\n\xF6\n7",
+-            "h\nu\n\xE9\n\x9C\n8",
+-            "i\nv\n\xEA\n\xF9\n9",
+-            "j\nw\n\xEB\n\xFA\n0",
+-            "k\nx\n\xEC\n\xFB\n,",
+-            "l\ny\n\xED\n\xFC\n.",
+-            "m\nz\n\xEE\n\xDF\n ",
+-        };
+-
+-        ((J2DTextBox*)hiraMojiPanes[i].pane)->setString(str01[i]);
+-        ((J2DTextBox*)kataMojiPanes[i].pane)->setString(str02[i]);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            static char str01[13][10] = {
++                "A\nN\n\xC0\n\xCF\n1",
++                "B\nO\n\xC1\n\xD0\n2",
++                "C\nP\n\xC2\n\xD1\n3",
++                "D\nQ\n\xC4\n\xD2\n4",
++                "E\nR\n\xC6\n\xD3\n5",
++                "F\nS\n\xC7\n\xD4\n6",
++                "G\nT\n\xC8\n\xD6\n7",
++                "H\nU\n\xC9\n\x8C\n8",
++                "I\nV\n\xCA\n\xD9\n9",
++                "J\nW\n\xCB\n\xDA\n0",
++                "K\nX\n\xCC\n\xDB\n,",
++                "L\nY\n\xCD\n\xDC\n.",
++                "M\nZ\n\xCE\n-\n ",
++            };
++
++            static char str02[13][10] = {
++                "a\nn\n\xE0\n\xEF\n1",
++                "b\no\n\xE1\n\xF0\n2",
++                "c\np\n\xE2\n\xF1\n3",
++                "d\nq\n\xE4\n\xF2\n4",
++                "e\nr\n\xE6\n\xF3\n5",
++                "f\ns\n\xE7\n\xF4\n6",
++                "g\nt\n\xE8\n\xF6\n7",
++                "h\nu\n\xE9\n\x9C\n8",
++                "i\nv\n\xEA\n\xF9\n9",
++                "j\nw\n\xEB\n\xFA\n0",
++                "k\nx\n\xEC\n\xFB\n,",
++                "l\ny\n\xED\n\xFC\n.",
++                "m\nz\n\xEE\n\xDF\n ",
++            };
++
++            ((J2DTextBox*)hiraMojiPanes[i].pane)->setString(str01[i]);
++            ((J2DTextBox*)kataMojiPanes[i].pane)->setString(str02[i]);
++        }
+ #endif
+     }
+ 
+@@ -1461,9 +1611,11 @@ void dName_c::screenSet() {
+     fopMsgM_setPaneData(&kanaBtnPane, nameIn.NameInScr->search('kana'));
+     ((J2DTextBox*)kanaBtnPane.pane)->setFont(nameIn.font);
+ 
+-#if VERSION <= VERSION_USA
+-    fopMsgM_setPaneData(&englBtnPane, nameIn.NameInScr->search('engl'));
+-    ((J2DTextBox*)englBtnPane.pane)->setFont(nameIn.font);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++    if (REGION_USA) {
++        fopMsgM_setPaneData(&englBtnPane, nameIn.NameInScr->search('engl'));
++        ((J2DTextBox*)englBtnPane.pane)->setFont(nameIn.font);
++    }
+ #endif
+ 
+     fopMsgM_setPaneData(&yazBtnPane, nameIn.NameInScr->search('yaz'));
+@@ -1476,20 +1628,22 @@ void dName_c::screenSet() {
+ 
+     fopMsgM_setPaneData(&namePane, nameIn.NameInScr->search('name'));
+     ((J2DTextBox*)namePane.pane)->setFont(nameIn.font);
+-#if VERSION == VERSION_PAL
+-    for (i = 0; i < 8; i++) {}
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        for (i = 0; i < 8; i++) {}
+ #if TARGET_PC
+-    {
+-        // The layout's "END" leaves a 4-byte string; the German "O.K." and Italian "FINE" strcpy'd into
+-        // it later need 5 (a 1-byte heap overflow on the GameCube too). Give it 5 bytes, same text.
+-        J2DTextBox* fin = (J2DTextBox*)finBtnPane.pane;
+-        char label[8];
+-        snprintf(label, sizeof(label), "%s", fin->getStringPtr());
+-        fin->setString("FINE");
+-        strcpy(fin->getStringPtr(), strlen(label) <= 4 ? label : "END");
+-    }
++        {
++            // The layout's "END" leaves a 4-byte string; the German "O.K." and Italian "FINE" strcpy'd into
++            // it later need 5 (a 1-byte heap overflow on the GameCube too). Give it 5 bytes, same text.
++            J2DTextBox* fin = (J2DTextBox*)finBtnPane.pane;
++            char label[8];
++            snprintf(label, sizeof(label), "%s", fin->getStringPtr());
++            fin->setString("FINE");
++            strcpy(fin->getStringPtr(), strlen(label) <= 4 ? label : "END");
++        }
+ #endif
+-    field_0x2ae8 = ((J2DTextBox*)finBtnPane.pane)->getStringPtr();
++        field_0x2ae8 = ((J2DTextBox*)finBtnPane.pane)->getStringPtr();
++    }
+ #endif
+     ((J2DTextBox*)namePane.pane)->setCharSpace(0.0f);
+ 
+@@ -1535,8 +1689,10 @@ void dName_c::screenSet() {
+         fopMsgM_setPaneData(&field_0x97c[i], nameIn.NameInScr->search(var_r22));
+         fopMsgM_setPaneData(&field_0xcfc[i], nameIn.NameInScr->search(var_r27));
+         fopMsgM_setPaneData(&field_0x107c[i], nameIn.NameInScr->search(var_r26));
+-#if VERSION <= VERSION_USA
+-        fopMsgM_setPaneData(&field_0x13fc[i], nameIn.NameInScr->search(var_r25));
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            fopMsgM_setPaneData(&field_0x13fc[i], nameIn.NameInScr->search(var_r25));
++        }
+ #endif
+         fopMsgM_setPaneData(&field_0x177c[i], nameIn.NameInScr->search(var_r24));
+         fopMsgM_setPaneData(&field_0x1afc[i], nameIn.NameInScr->search(var_r23));
+@@ -1573,8 +1729,10 @@ void dName_c::screenSet() {
+             'n306', 'n307', 'n308', 'n309', 'n310',
+         };
+ 
+-#if VERSION <= VERSION_USA
+-        fopMsgM_setPaneData(&field_0x11cc[i], nameIn.NameInScr->search(l_EisuB[i]));
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            fopMsgM_setPaneData(&field_0x11cc[i], nameIn.NameInScr->search(l_EisuB[i]));
++        }
+ #endif
+ 
+         static u32 l_KataB[] = {
+@@ -1634,8 +1792,10 @@ void dName_c::paneTransInit() {
+     PaneTranceBase(paneTransTimer, g_nmHIO.field_0x8, g_nmHIO.field_0x46, 0.0f, 1, 0);
+     PaneTranceKata(paneTransTimer, g_nmHIO.field_0x9, g_nmHIO.field_0x48, 0.0f, 1, 0);
+     PaneTranceHira(paneTransTimer, g_nmHIO.field_0xa, g_nmHIO.field_0x48, 0.0f, 1, 0);
+-#if VERSION <= VERSION_USA
+-    PaneTranceEisu(paneTransTimer, g_nmHIO.field_0xb, g_nmHIO.field_0x48, 0.0f, 1, 0);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++    if (REGION_USA) {
++        PaneTranceEisu(paneTransTimer, g_nmHIO.field_0xb, g_nmHIO.field_0x48, 0.0f, 1, 0);
++    }
+ #endif
+     PaneTranceArrow(paneTransTimer, g_nmHIO.field_0xc, g_nmHIO.field_0x48, 0.0f, 1, 0);
+     PaneTranceEnd(paneTransTimer, g_nmHIO.field_0xd, g_nmHIO.field_0x48, 0.0f, 1, 0);
+@@ -1787,7 +1947,7 @@ int dName_c::PaneTranceBase(s16 i_value, u8 i_max, f32 param_2, f32 param_3, u8
+     case MOJI_KATA:
+         pane = kataMojiPanes;
+         break;
+-#if VERSION <= VERSION_USA
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
+     case MOJI_EIGO:
+         pane = eisuMojiPanes;
+         break;
+@@ -1806,8 +1966,10 @@ int dName_c::PaneTranceBase(s16 i_value, u8 i_max, f32 param_2, f32 param_3, u8
+     for (i = 0; i < 13; i++) {
+         fopMsgM_paneTrans(&hiraMojiPanes[i], 0.0f, param_2 + temp_f0);
+         fopMsgM_paneTrans(&kataMojiPanes[i], 0.0f, param_2 + temp_f0);
+-#if VERSION <= VERSION_USA
+-        fopMsgM_paneTrans(&eisuMojiPanes[i], 0.0f, param_2 + temp_f0);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            fopMsgM_paneTrans(&eisuMojiPanes[i], 0.0f, param_2 + temp_f0);
++        }
+ #endif
+     }
+ 
+@@ -1901,6 +2063,9 @@ int dName_c::PaneTranceKata(s16 i_value, u8 i_max, f32 param_2, f32 param_3, u8
+ 
+ /* 80219F24-8021A034       .text PaneTranceEisu__7dName_cFsUcffUci */
+ int dName_c::PaneTranceEisu(s16 i_value, u8 i_max, f32 param_2, f32 param_3, u8 i_mode, int param_5) {
++#if COS_RUNTIME_REGION
++    if (REGION_PAL) return 1;
++#endif
+     int i;
+ 
+     if (i_value < 0) {
+@@ -2017,10 +2182,19 @@ void dName_c::displayInit() {
+     for (i = 0; i < 8; i++) {
+         chrInfo[i].column = 7;
+         chrInfo[i].row = 1;
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++        chrInfo[i].set = MOJI_HIRA;
++}
++else {
++        chrInfo[i].set = MOJI_EIGO;
++}
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+         chrInfo[i].set = MOJI_HIRA;
+ #else
+         chrInfo[i].set = MOJI_EIGO;
++#endif
+ #endif
+         chrInfo[i].field_0x3 = 1;
+ #if VERSION <= VERSION_JPN
+@@ -2038,35 +2212,53 @@ void dName_c::displayInit() {
+             NameStrSet();
+         }
+ 
+-#if VERSION == VERSION_PAL
+-        char msg[32];
+-        fopMsgM_messageGet(msg, 0x28);
+-        ((J2DTextBox*)titlePane.pane)->setString(msg);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            char msg[32];
++            fopMsgM_messageGet(msg, 0x28);
++            ((J2DTextBox*)titlePane.pane)->setString(msg);
++        }
+ #endif
+ 
+         inputCompleteSound = JA_SE_MSEL_ENTER_GAME;
+     }
+ 
+-#if VERSION == VERSION_PAL
+-    switch (dComIfGs_getPalLanguage()) {
+-    case 0:
+-        strcpy(field_0x2ae8, "END");
+-        break;
+-    case 1:
+-        strcpy(field_0x2ae8, "O.K.");
+-        break;
+-    case 2:
+-        strcpy(field_0x2ae8, "FIN");
+-        break;
+-    case 3:
+-        strcpy(field_0x2ae8, "FIN");
+-        break;
+-    case 4:
+-        strcpy(field_0x2ae8, "FINE");
+-        break;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        switch (dComIfGs_getPalLanguage()) {
++        case 0:
++            strcpy(field_0x2ae8, "END");
++            break;
++        case 1:
++            strcpy(field_0x2ae8, "O.K.");
++            break;
++        case 2:
++            strcpy(field_0x2ae8, "FIN");
++            break;
++        case 3:
++            strcpy(field_0x2ae8, "FIN");
++            break;
++        case 4:
++            strcpy(field_0x2ae8, "FINE");
++            break;
++        }
+     }
+ #endif
+ 
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++    selMenu = MENU_HIRA;
++    mojiSet = MOJI_HIRA;
++}
++else {
++    selMenu = MENU_BACKSPACE;
++    mojiSet = MOJI_EIGO;
++
++    field_0x1afc[0].pane->hide();
++    field_0x177c[0].pane->hide();
++    field_0x13fc[0].pane->hide();
++}
++#else
+ #if VERSION <= VERSION_JPN || VERSION == VERSION_PAL
+     selMenu = MENU_HIRA;
+     mojiSet = MOJI_HIRA;
+@@ -2077,22 +2269,38 @@ void dName_c::displayInit() {
+     field_0x1afc[0].pane->hide();
+     field_0x177c[0].pane->hide();
+     field_0x13fc[0].pane->hide();
++#endif
+ #endif
+ 
+     selProc = PROC_MOJI_SELECT;
+ 
+     for (i = 0; i < 13; i++) {
+         fopMsgM_setInitAlpha(&hiraMojiPanes[i]);
+-#if VERSION <= VERSION_USA
+-        fopMsgM_setInitAlpha(&eisuMojiPanes[i]);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            fopMsgM_setInitAlpha(&eisuMojiPanes[i]);
++        }
+ #endif
+         fopMsgM_setInitAlpha(&kataMojiPanes[i]);
+         fopMsgM_setAlpha(&hiraMojiPanes[i]);
+-#if VERSION <= VERSION_USA
+-        fopMsgM_setAlpha(&eisuMojiPanes[i]);
++#if COS_RUNTIME_REGION || (VERSION <= VERSION_USA)
++        if (REGION_USA) {
++            fopMsgM_setAlpha(&eisuMojiPanes[i]);
++        }
+ #endif
+         fopMsgM_setAlpha(&kataMojiPanes[i]);
+ 
++#if COS_RUNTIME_REGION
++if (REGION_USA) {
++        hiraMojiPanes[i].pane->hide();
++        eisuMojiPanes[i].pane->show();
++        kataMojiPanes[i].pane->hide();
++}
++else {
++        hiraMojiPanes[i].pane->show();
++        kataMojiPanes[i].pane->hide();
++}
++#else
+ #if VERSION <= VERSION_JPN
+         hiraMojiPanes[i].pane->show();
+         eisuMojiPanes[i].pane->hide();
+@@ -2104,6 +2312,7 @@ void dName_c::displayInit() {
+ #else
+         hiraMojiPanes[i].pane->show();
+         kataMojiPanes[i].pane->hide();
++#endif
+ #endif
+     }
+ 
+@@ -2125,6 +2334,145 @@ void dName_c::NameStrSet() {
+     int j;
+     BOOL found;
+     while (*moji != 0) {
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++        chrInfo[i].character = (u8)*moji;
++
++        found = false;
++        for (j = 0; j < 13; j++) {
++            if (found)
++                break;
++
++            char* upperMoji = ((J2DTextBox*)hiraMojiPanes[j].pane)->getStringPtr();
++            char* lowerMoji = ((J2DTextBox*)kataMojiPanes[j].pane)->getStringPtr();
++
++            int row = 0;
++            while (*upperMoji != 0) {
++                if (*upperMoji == '\n') {
++                    upperMoji++;
++                    continue;
++                }
++
++                if (*upperMoji == chrInfo[i].character) {
++                    chrInfo[i].column = j;
++                    chrInfo[i].row = row;
++                    chrInfo[i].set = MOJI_HIRA;
++                    found = true;
++                    break;
++                }
++
++                row++;
++                upperMoji++;
++            }
++
++            row = 0;
++            while (*lowerMoji != 0) {
++                if (*lowerMoji == '\n') {
++                    lowerMoji++;
++                    continue;
++                }
++
++                if (*lowerMoji == chrInfo[i].character) {
++                    chrInfo[i].column = j;
++                    chrInfo[i].row = row;
++                    chrInfo[i].set = MOJI_KATA;
++                    found = true;
++                    break;
++                }
++
++                row++;
++                lowerMoji++;
++            }
++        }
++        moji++;
++        i++;
++}
++else {
++        if (*(u8*)moji >> 4 == 8 || *(u8*)moji >> 4 == 9) {
++            chrInfo[i].character = *(u16*)moji;
++
++            found = false;
++            for (j = 0; j < 13; j++) {
++                if (found)
++                    break;
++
++                char* hiraMoji = ((J2DTextBox*)hiraMojiPanes[j].pane)->getStringPtr();
++                char* kataMoji = ((J2DTextBox*)kataMojiPanes[j].pane)->getStringPtr();
++
++                int row = 0;
++                while (*hiraMoji != 0) {
++                    if (*hiraMoji == '\n') {
++                        hiraMoji++;
++                        continue;
++                    }
++
++                    if (*(u16*)hiraMoji == chrInfo[i].character) {
++                        chrInfo[i].column = j;
++                        chrInfo[i].row = row;
++                        chrInfo[i].set = MOJI_HIRA;
++                        found = true;
++                        break;
++                    }
++
++                    row++;
++                    hiraMoji += 2;
++                }
++
++                row = 0;
++                while (*kataMoji != 0) {
++                    if (*kataMoji == '\n') {
++                        kataMoji++;
++                        continue;
++                    }
++
++                    if (*(u16*)kataMoji == chrInfo[i].character) {
++                        chrInfo[i].column = j;
++                        chrInfo[i].row = row;
++                        chrInfo[i].set = MOJI_KATA;
++                        found = true;
++                        break;
++                    }
++
++                    row++;
++                    kataMoji += 2;
++                }
++            }
++            moji += 2;
++            i++;
++        } else {
++            chrInfo[i].character = *moji;
++            chrInfo[i].set = MOJI_EIGO;
++
++            found = false;
++            for (j = 0; j < 13; j++) {
++                if (found)
++                    break;
++
++                char* eisuMoji = ((J2DTextBox*)eisuMojiPanes[j].pane)->getStringPtr();
++
++                int row = 0;
++                while (*eisuMoji != 0) {
++                    if (*eisuMoji == '\n') {
++                        eisuMoji++;
++                        continue;
++                    }
++
++                    if (*eisuMoji == chrInfo[i].character) {
++                        chrInfo[i].column = j;
++                        chrInfo[i].row = row;
++                        found = true;
++                        break;
++                    }
++
++                    row++;
++                    eisuMoji++;
++                }
++            }
++            moji++;
++            i++;
++        }
++}
++#else
+ #if VERSION == VERSION_PAL
+         chrInfo[i].character = (u8)*moji;
+ 
+@@ -2260,6 +2608,7 @@ void dName_c::NameStrSet() {
+             moji++;
+             i++;
+         }
++#endif
+ #endif
+     }
+ 
+diff --git a/game/src/d/d_s_menu.cpp b/game/src/d/d_s_menu.cpp
+index c2ed48e7..0fb9968c 100644
+--- a/game/src/d/d_s_menu.cpp
++++ b/game/src/d/d_s_menu.cpp
+@@ -230,8 +230,10 @@ static BOOL dScnMenu_Execute(menu_of_scene_class* i_this) {
+         if (++l_languageType > 4)
+             l_languageType = 0;
+         dComIfGs_setPalLanguage(language[l_languageType]);
+-#if VERSION == VERSION_PAL
+-        g_mDoMemCd_control.field_0x165B = language[l_languageType];
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            g_mDoMemCd_control.field_0x165B = language[l_languageType];
++        }
+ #endif
+     }
+ #endif
+@@ -291,13 +293,15 @@ static BOOL dScnMenu_IsDelete(menu_of_scene_class*) {
+ 
+ /* 8022F320-8022F3C4       .text dScnMenu_Delete__FP19menu_of_scene_class */
+ static BOOL dScnMenu_Delete(menu_of_scene_class* i_this) {
+-#if VERSION == VERSION_PAL
+-    dScnMenu_bmg_data_set();
+-    dScnMenu_tex_data_set();
+-    if (mBmgStatus2 < 6) {
+-        return false;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        dScnMenu_bmg_data_set();
++        dScnMenu_tex_data_set();
++        if (mBmgStatus2 < 6) {
++            return false;
++        }
++        mBmgStatus2 = 0;
+     }
+-    mBmgStatus2 = 0;
+ #endif
+     JUTDbPrint::getManager()->changeFont(JFWSystem::systemFont);
+     delete i_this->font;
+diff --git a/game/src/d/d_s_name.cpp b/game/src/d/d_s_name.cpp
+index f93d5192..a2469015 100644
+--- a/game/src/d/d_s_name.cpp
++++ b/game/src/d/d_s_name.cpp
+@@ -1,3 +1,6 @@
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_aspect.h"
++#endif
+ //
+ // Generated by dtk
+ // Translation Unit: d_s_name.cpp
+@@ -117,11 +120,13 @@ cPhs_State dScnName_c::create() {
+     dComIfGp_setStartStage(dComIfGp_getNextStartStage());
+     dComIfGp_offEnableNextStage();
+ 
+-#if VERSION == VERSION_PAL
+-    if (fpcM_GetName(this) == fpcNm_NAME_SCENE_e) {
+-        bmg_data_read_all();
+-        if (mBmgStatus < 3) {
+-            return cPhs_INIT_e;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        if (fpcM_GetName(this) == fpcNm_NAME_SCENE_e) {
++            bmg_data_read_all();
++            if (mBmgStatus < 3) {
++                return cPhs_INIT_e;
++            }
+         }
+     }
+ #endif
+@@ -154,8 +159,10 @@ cPhs_State dScnName_c::create() {
+         dFs_c = new dFile_select_c();
+         JUT_ASSERT(VERSION_SELECT(316, 319, 470, 473), dFs_c != NULL);
+         dFs_c->archive = mArchive;
+-#if VERSION == VERSION_PAL
+-        dFs_c->setField_0x3cd4(field_0x1d8);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            dFs_c->setField_0x3cd4(field_0x1d8);
++        }
+ #endif
+         savePicDatabuf = new (0x20) card_pictdata[3 * 3];
+         JUT_ASSERT(VERSION_SELECT(322, 325, 476, 483), savePicDatabuf != NULL);
+@@ -258,8 +265,10 @@ cPhs_State dScnName_c::create() {
+ #endif
+ 
+         JFWDisplay::getManager()->setTickRate(OS_TIMER_CLOCK / 30);
+-#if VERSION == VERSION_PAL
+-        mBmgStatus = 0;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            mBmgStatus = 0;
++        }
+ #endif
+     }
+     return rt;
+@@ -399,6 +408,26 @@ void dScnName_c::buttonIconCreate() {
+     fopMsgM_setPaneData(&field_0x474, btnIcon.scr->search('bab'));
+     fopMsgM_setPaneData(&field_0x4ac, btnIcon.scr->search('baat'));
+     fopMsgM_setPaneData(&field_0x4e4[0], btnIcon.scr->search('bawp'));
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++    fopMsgM_setPaneData(&field_0x4e4[1], btnIcon.scr->search('bap2'));
++    fopMsgM_setPaneData(&field_0x554[0], btnIcon.scr->search('bawd'));
++    fopMsgM_setPaneData(&field_0x554[1], btnIcon.scr->search('bad2'));
++
++    fopMsgM_setNowAlpha(&field_0x4e4[1], 0.0f);
++    fopMsgM_setNowAlpha(&field_0x554[1], 0.0f);
++    fopMsgM_setAlpha(&field_0x4e4[1]);
++    fopMsgM_setAlpha(&field_0x554[1]);
++
++    field_0x1c58 = 0;
++    field_0x1c5a = 0;
++    field_0x1c59 = 0;
++    buttonIconTexChange(dComIfGs_getPalLanguage(), field_0x1c58);
++}
++else {
++    fopMsgM_setPaneData(&field_0x4e4[1], btnIcon.scr->search('bawd'));
++}
++#else
+ #if VERSION == VERSION_PAL
+     fopMsgM_setPaneData(&field_0x4e4[1], btnIcon.scr->search('bap2'));
+     fopMsgM_setPaneData(&field_0x554[0], btnIcon.scr->search('bawd'));
+@@ -415,6 +444,7 @@ void dScnName_c::buttonIconCreate() {
+     buttonIconTexChange(dComIfGs_getPalLanguage(), field_0x1c58);
+ #else
+     fopMsgM_setPaneData(&field_0x4e4[1], btnIcon.scr->search('bawd'));
++#endif
+ #endif
+     field_0x1bb4 = 0;
+     paneTransButtonIcon(field_0x1bb4, g_snHIO.field_0xe, g_snHIO.field_0xc, 0.0f, 0);
+@@ -533,9 +563,11 @@ BOOL dScnName_c::paneTransButtonIcon(s16 param_1, u8 param_2, f32 param_3, f32 p
+     fopMsgM_paneTrans(&field_0x4ac, 0.0f, param_3 + tmp);
+     fopMsgM_paneTrans(&field_0x4e4[0], 0.0f, param_3 + tmp);
+     fopMsgM_paneTrans(&field_0x4e4[1], 0.0f, param_3 + tmp);
+-#if VERSION == VERSION_PAL
+-    fopMsgM_paneTrans(&field_0x554[0], 0.0f, param_3 + tmp);
+-    fopMsgM_paneTrans(&field_0x554[1], 0.0f, param_3 + tmp);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        fopMsgM_paneTrans(&field_0x554[0], 0.0f, param_3 + tmp);
++        fopMsgM_paneTrans(&field_0x554[1], 0.0f, param_3 + tmp);
++    }
+ #endif
+     return false;
+ }
+@@ -1016,8 +1048,10 @@ void dScnName_c::NoteOpenWait() {
+         if (fpcM_GetName(this) == fpcNm_NAME_SCENE_e) {
+             dFs_c->setSaveDataPtr(saveMemory);
+             dFs_c->setSavePicDataPtr((u8*)savePicDatabuf);
+-#if VERSION == VERSION_PAL
+-            dFs_c->setField_0x3cd4(field_0x1d8);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++            if (REGION_PAL) {
++                dFs_c->setField_0x3cd4(field_0x1d8);
++            }
+ #endif
+         }
+         if (fpcM_GetName(this) == fpcNm_NAMEEX_SCENE_e) {
+@@ -1025,21 +1059,23 @@ void dScnName_c::NoteOpenWait() {
+             dFs_c->setSavePicDataPtr((u8*)savePicDatabuf);
+         }
+         dFs_c->initial();
+-#if VERSION == VERSION_PAL
+-        field_0x1c58 = 0;
+-        buttonIconTexChange(dComIfGs_getPalLanguage(), field_0x1c58);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            field_0x1c58 = 0;
++            buttonIconTexChange(dComIfGs_getPalLanguage(), field_0x1c58);
+ 
+-        fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58 ^ 1], 0.0f);
+-        fopMsgM_setNowAlpha(&field_0x554[field_0x1c58 ^ 1], 0.0f);
+-        fopMsgM_setAlpha(&field_0x4e4[field_0x1c58 ^ 1]);
+-        fopMsgM_setAlpha(&field_0x554[field_0x1c58 ^ 1]);
++            fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58 ^ 1], 0.0f);
++            fopMsgM_setNowAlpha(&field_0x554[field_0x1c58 ^ 1], 0.0f);
++            fopMsgM_setAlpha(&field_0x4e4[field_0x1c58 ^ 1]);
++            fopMsgM_setAlpha(&field_0x554[field_0x1c58 ^ 1]);
+ 
+-        fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58], 1.0f);
+-        fopMsgM_setNowAlpha(&field_0x554[field_0x1c58], 1.0f);
+-        fopMsgM_setAlpha(&field_0x4e4[field_0x1c58]);
+-        fopMsgM_setAlpha(&field_0x554[field_0x1c58]);
++            fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58], 1.0f);
++            fopMsgM_setNowAlpha(&field_0x554[field_0x1c58], 1.0f);
++            fopMsgM_setAlpha(&field_0x4e4[field_0x1c58]);
++            fopMsgM_setAlpha(&field_0x554[field_0x1c58]);
+ 
+-        field_0x1c58 ^= 1;
++            field_0x1c58 ^= 1;
++        }
+ #endif
+         mMainProc = 3;
+         mOpenProc = 0;
+@@ -1068,6 +1104,23 @@ void dScnName_c::buttonIconProc() {
+         break;
+     case 1:
+         {
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            if (field_0x554[field_0x1c58].pane->isVisible()) {
++                field_0x554[0].pane->hide();
++                field_0x554[1].pane->hide();
++                field_0x474.pane->hide();
++                field_0x4ac.pane->hide();
++            }
++}
++else {
++            if (field_0x4e4[1].pane->isVisible()) {
++                field_0x4e4[1].pane->hide();
++                field_0x474.pane->hide();
++                field_0x4ac.pane->hide();
++            }
++}
++#else
+ #if VERSION == VERSION_PAL
+             if (field_0x554[field_0x1c58].pane->isVisible()) {
+                 field_0x554[0].pane->hide();
+@@ -1081,6 +1134,7 @@ void dScnName_c::buttonIconProc() {
+                 field_0x474.pane->hide();
+                 field_0x4ac.pane->hide();
+             }
++#endif
+ #endif
+             s32 ret = paneTransButtonIcon(field_0x1bb4 - g_snHIO.field_0xf, g_snHIO.field_0xe, g_snHIO.field_0xc, 0.0f, 1);
+             field_0x1bb4++;
+@@ -1093,6 +1147,23 @@ void dScnName_c::buttonIconProc() {
+         break;
+     case 2:
+         {
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            if (!field_0x554[field_0x1c58].pane->isVisible()) {
++                field_0x554[0].pane->show();
++                field_0x554[1].pane->show();
++                field_0x474.pane->show();
++                field_0x4ac.pane->show();
++            }
++}
++else {
++            if (!field_0x4e4[1].pane->isVisible()) {
++                field_0x4e4[1].pane->show();
++                field_0x474.pane->show();
++                field_0x4ac.pane->show();
++            }
++}
++#else
+ #if VERSION == VERSION_PAL
+             if (!field_0x554[field_0x1c58].pane->isVisible()) {
+                 field_0x554[0].pane->show();
+@@ -1106,6 +1177,7 @@ void dScnName_c::buttonIconProc() {
+                 field_0x474.pane->show();
+                 field_0x4ac.pane->show();
+             }
++#endif
+ #endif
+             s32 ret = paneTransButtonIcon(field_0x1bb4 - g_snHIO.field_0xf, g_snHIO.field_0xe, g_snHIO.field_0xc, 0.0f, 1);
+             field_0x1bb4++;
+@@ -1133,6 +1205,23 @@ void dScnName_c::buttonIconProc() {
+             field_0x1bb4++;
+             if (ret == 1) {
+                 field_0x1bb4 = 0;
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++                if (!field_0x554[field_0x1c58].pane->isVisible()) {
++                    field_0x554[0].pane->show();
++                    field_0x554[1].pane->show();
++                    field_0x474.pane->show();
++                    field_0x4ac.pane->show();
++                }
++}
++else {
++                if (!field_0x4e4[1].pane->isVisible()) {
++                    field_0x4e4[1].pane->show();
++                    field_0x474.pane->show();
++                    field_0x4ac.pane->show();
++                }
++}
++#else
+ #if VERSION == VERSION_PAL
+                 if (!field_0x554[field_0x1c58].pane->isVisible()) {
+                     field_0x554[0].pane->show();
+@@ -1146,6 +1235,7 @@ void dScnName_c::buttonIconProc() {
+                     field_0x474.pane->show();
+                     field_0x4ac.pane->show();
+                 }
++#endif
+ #endif
+                 field_0x1bb6 = 0;
+                 dFs_c->setIconMode(field_0x1bb6);
+@@ -1158,6 +1248,23 @@ void dScnName_c::buttonIconProc() {
+             field_0x1bb4++;
+             if (ret == 1) {
+                 field_0x1bb4 = 0;
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++                if (field_0x554[field_0x1c58].pane->isVisible()) {
++                    field_0x554[0].pane->hide();
++                    field_0x554[1].pane->hide();
++                    field_0x474.pane->hide();
++                    field_0x4ac.pane->hide();
++                }
++}
++else {
++                if (field_0x4e4[1].pane->isVisible()) {
++                    field_0x4e4[1].pane->hide();
++                    field_0x474.pane->hide();
++                    field_0x4ac.pane->hide();
++                }
++}
++#else
+ #if VERSION == VERSION_PAL
+                 if (field_0x554[field_0x1c58].pane->isVisible()) {
+                     field_0x554[0].pane->hide();
+@@ -1171,6 +1278,7 @@ void dScnName_c::buttonIconProc() {
+                     field_0x474.pane->hide();
+                     field_0x4ac.pane->hide();
+                 }
++#endif
+ #endif
+                 field_0x1bb6 = 0;
+                 dFs_c->setIconMode(field_0x1bb6);
+@@ -1211,12 +1319,14 @@ void dScnName_c::FileSelectMain() {
+ 
+ /* 80231A8C-80231CB8       .text FileSelectMainNormal__10dScnName_cFv */
+ void dScnName_c::FileSelectMainNormal() {
+-#if VERSION == VERSION_PAL
+-    if (dFs_c->getField_0x3cd3() != 0) {
+-        languageTexChange();
+-        dFs_c->setField_0x3cd3(0);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        if (dFs_c->getField_0x3cd3() != 0) {
++            languageTexChange();
++            dFs_c->setField_0x3cd3(0);
++        }
++        langTexChg();
+     }
+-    langTexChg();
+ #endif
+     switch (dFs_c->isSelectEnd()) {
+     case 1:
+@@ -1402,21 +1512,23 @@ void dScnName_c::NameInMain() {
+ void dScnName_c::NameInClose() {
+     if ((BOOL)dNm_c->_close() == TRUE) {
+         dFs_c->initial();
+-#if VERSION == VERSION_PAL
+-        field_0x1c58 = 0;
+-        buttonIconTexChange(dComIfGs_getPalLanguage(), field_0x1c58);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            field_0x1c58 = 0;
++            buttonIconTexChange(dComIfGs_getPalLanguage(), field_0x1c58);
+ 
+-        fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58 ^ 1], 0.0f);
+-        fopMsgM_setNowAlpha(&field_0x554[field_0x1c58 ^ 1], 0.0f);
+-        fopMsgM_setAlpha(&field_0x4e4[field_0x1c58 ^ 1]);
+-        fopMsgM_setAlpha(&field_0x554[field_0x1c58 ^ 1]);
++            fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58 ^ 1], 0.0f);
++            fopMsgM_setNowAlpha(&field_0x554[field_0x1c58 ^ 1], 0.0f);
++            fopMsgM_setAlpha(&field_0x4e4[field_0x1c58 ^ 1]);
++            fopMsgM_setAlpha(&field_0x554[field_0x1c58 ^ 1]);
+ 
+-        fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58], 1.0f);
+-        fopMsgM_setNowAlpha(&field_0x554[field_0x1c58], 1.0f);
+-        fopMsgM_setAlpha(&field_0x4e4[field_0x1c58]);
+-        fopMsgM_setAlpha(&field_0x554[field_0x1c58]);
++            fopMsgM_setNowAlpha(&field_0x4e4[field_0x1c58], 1.0f);
++            fopMsgM_setNowAlpha(&field_0x554[field_0x1c58], 1.0f);
++            fopMsgM_setAlpha(&field_0x4e4[field_0x1c58]);
++            fopMsgM_setAlpha(&field_0x554[field_0x1c58]);
+ 
+-        field_0x1c58 ^= 1;
++            field_0x1c58 ^= 1;
++        }
+ #endif
+         mMainProc = 3;
+         mOpenProc = 0;
+@@ -1534,13 +1646,15 @@ static BOOL dScnName_IsDelete(dScnName_c*) {
+ 
+ /* 80232380-802323A8       .text dScnName_Delete__FP10dScnName_c */
+ static BOOL dScnName_Delete(dScnName_c* i_this) {
+-#if VERSION == VERSION_PAL
+-    i_this->bmg_data_set();
+-    i_this->tex_data_set();
+-    if (mBmgStatus < 6) {
+-        return FALSE;
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        i_this->bmg_data_set();
++        i_this->tex_data_set();
++        if (mBmgStatus < 6) {
++            return FALSE;
++        }
++        mBmgStatus = 0;
+     }
+-    mBmgStatus = 0;
+ #endif
+     i_this->~dScnName_c();
+     return TRUE;
+@@ -1564,7 +1678,12 @@ static cPhs_State dScnName_Create(scene_class* i_scn) {
+ void dDlst_BTICN_c::draw() {
+     J2DOrthoGraph* graf = dComIfGp_getCurrentGrafPort();
+     graf->setPort();
++#if TARGET_PC && defined(__PROSPERO__)
++    // Match the HUD's right-edge anchoring at widescreen aspect ratios.
++    scr->draw(pc_aspect_hud_shift(), 0.0f, graf);
++#else
+     scr->draw(0.0f, 0.0f, graf);
++#endif
+ }
+ 
+ /* 8023245C-80232518       .text draw__19dDlst_FLSEL_CLOTH_cFv */
+diff --git a/game/src/pal/d/d_file_select.inc b/game/src/pal/d/d_file_select.inc
+index 029b2f17..c6e2a635 100644
+--- a/game/src/pal/d/d_file_select.inc
++++ b/game/src/pal/d/d_file_select.inc
+@@ -16,11 +16,15 @@
+ #include "m_Do/m_Do_controller_pad.h"
+ #include <stdio.h>
+ 
++#if COS_RUNTIME_REGION
++#define FS_DATA_PANE_H REGION_SELECT(85.0f, 81.0f)
++#else
+ #if VERSION == VERSION_PAL
+ #define FS_DATA_PANE_H 81.0f
+ #else
+ #define FS_DATA_PANE_H 85.0f
+ #endif
++#endif
+ 
+ dFs_HIO_c g_fsHIO;
+ 
+@@ -136,16 +140,18 @@ void dFile_select_c::_create() {
+     }
+ 
+     selectNum = 0;
+-#if VERSION == VERSION_PAL
+-    if(g_mDoMemCd_control.field_0x165B != dComIfGs_getPalLanguage()) {
+-        if(mUseType == 1) {
+-            g_mDoMemCd_control.field_0x165B = dComIfGs_getPalLanguage();
+-        } else {
+-            dComIfGs_setPalLanguage(g_mDoMemCd_control.field_0x165B);
+-            dComIfGp_setMsgDtArchive(field_0x3cd4[g_mDoMemCd_control.field_0x165B]);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        if(g_mDoMemCd_control.field_0x165B != dComIfGs_getPalLanguage()) {
++            if(mUseType == 1) {
++                g_mDoMemCd_control.field_0x165B = dComIfGs_getPalLanguage();
++            } else {
++                dComIfGs_setPalLanguage(g_mDoMemCd_control.field_0x165B);
++                dComIfGp_setMsgDtArchive(field_0x3cd4[g_mDoMemCd_control.field_0x165B]);
++            }
+         }
++        field_0x3cc6 = dComIfGs_getPalLanguage();
+     }
+-    field_0x3cc6 = dComIfGs_getPalLanguage();
+ #endif
+     screenSet();
+     displayInit();
+@@ -154,16 +160,18 @@ void dFile_select_c::_create() {
+ 
+ /* 8017FCC0-8017FCF4       .text initial__14dFile_select_cFv */
+ void dFile_select_c::initial() {
+-#if VERSION == VERSION_PAL
+-    if(g_mDoMemCd_control.field_0x165B != dComIfGs_getPalLanguage()) {
+-        if(mUseType == 1) {
+-            g_mDoMemCd_control.field_0x165B = dComIfGs_getPalLanguage();
+-        } else {
+-            dComIfGs_setPalLanguage(g_mDoMemCd_control.field_0x165B);
+-            dComIfGp_setMsgDtArchive(field_0x3cd4[g_mDoMemCd_control.field_0x165B]);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        if(g_mDoMemCd_control.field_0x165B != dComIfGs_getPalLanguage()) {
++            if(mUseType == 1) {
++                g_mDoMemCd_control.field_0x165B = dComIfGs_getPalLanguage();
++            } else {
++                dComIfGs_setPalLanguage(g_mDoMemCd_control.field_0x165B);
++                dComIfGp_setMsgDtArchive(field_0x3cd4[g_mDoMemCd_control.field_0x165B]);
++            }
+         }
++        field_0x3cc6 = dComIfGs_getPalLanguage();
+     }
+-    field_0x3cc6 = dComIfGs_getPalLanguage();
+ #endif
+     displayInit();
+     paneTransInit();
+@@ -243,9 +251,11 @@ void dFile_select_c::_move() {
+     if((mDoMemCd_getProbeStat() == 0 || mDoMemCd_getProbeStat() == 1) && field_0x3941 == 0)
+ #endif
+     {
+-#if VERSION == VERSION_PAL
+-        if(mUseType != 1) {
+-            dComIfGp_setMsgDtArchive(field_0x3cd4[g_mDoMemCd_control.field_0x165B]);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            if(mUseType != 1) {
++                dComIfGp_setMsgDtArchive(field_0x3cd4[g_mDoMemCd_control.field_0x165B]);
++            }
+         }
+ #endif
+         field_0x392e = 1;
+@@ -502,7 +512,7 @@ void dFile_select_c::dataSelect() {
+         mIconMode = 4;
+         field_0x2fc0[0].pane->hide();
+ #if VERSION == VERSION_PAL
+-        if(selectNum == 3) {
++        if(REGION_PAL && selectNum == 3) {
+             field_0x3930 = 0;
+             mLangBase[0].pane->show();
+             langSelCurAnimeInit();
+@@ -531,7 +541,7 @@ void dFile_select_c::dataSelect() {
+         }
+     }
+     else if(stick2->checkDownTrigger()) {
+-        if(selectNum != VERSION_SELECT(2, 2, 2, 3)) {
++        if(selectNum != REGION_SELECT(2, 3)) {
+             mDoAud_seStart(JA_SE_MSEL_CURSOR);
+             selectNum++;
+             field_0x3948 = 0.0f;
+@@ -605,7 +615,7 @@ void dFile_select_c::SelectTitAnime() {
+ 
+ #if VERSION == VERSION_PAL
+     f32 offset = 0.0f;
+-    if(selectNum == 3) {
++    if(REGION_PAL && selectNum == 3) {
+         offset = 8.0f;
+     }
+     fopMsgM_paneTrans(field_0x2fc0, 0.0f, offset + (selectNum * FS_DATA_PANE_H + field_0x3948));
+@@ -628,7 +638,7 @@ void dFile_select_c::SelectTitAnime() {
+ void dFile_select_c::recCursorMove() {
+ #if VERSION == VERSION_PAL
+     f32 offset = 0.0f;
+-    if(selectNum == 3) {
++    if(REGION_PAL && selectNum == 3) {
+         offset = 8.0f;
+     }
+     fopMsgM_paneTrans(field_0x2fc0, 0.0f, selectNum * FS_DATA_PANE_H + offset);
+@@ -2345,9 +2355,11 @@ void dFile_select_c::screenSet() {
+     fopMsgM_setPaneData(&field_0xf0[1], fileSel.Scr->search('nt00'));
+     fopMsgM_setPaneData(&field_0x160, fileSel.Scr->search('mes1'));
+     ((J2DTextBox*)field_0x160.pane)->setFont(fileSel.font);
+-#if VERSION == VERSION_PAL
+-    fopMsgM_setPaneData(&mMes2, fileSel.Scr->search('mes2'));
+-    ((J2DTextBox*)mMes2.pane)->setFont(fileSel.font);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        fopMsgM_setPaneData(&mMes2, fileSel.Scr->search('mes2'));
++        ((J2DTextBox*)mMes2.pane)->setFont(fileSel.font);
++    }
+ #endif
+ 
+     char str2[0x80];
+@@ -2356,6 +2368,21 @@ void dFile_select_c::screenSet() {
+     }
+     str2[0x7F] = 0;
+     ((J2DTextBox*)field_0x160.pane)->setString(str2);
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++    ((J2DTextBox*)mMes2.pane)->setString(str2);
++    if(dComIfGs_getPalLanguage() == 0) {
++        mMes2.pane->hide();
++        field_0x38e8[2] = ((J2DTextBox*)field_0x160.pane)->getStringPtr();
++    } else {
++        field_0x160.pane->hide();
++        field_0x38e8[2] = ((J2DTextBox*)mMes2.pane)->getStringPtr();
++    }
++}
++else {
++    field_0x38e8[2] = ((J2DTextBox*)field_0x160.pane)->getStringPtr();
++}
++#else
+ #if VERSION == VERSION_PAL
+     ((J2DTextBox*)mMes2.pane)->setString(str2);
+     if(dComIfGs_getPalLanguage() == 0) {
+@@ -2367,6 +2394,7 @@ void dFile_select_c::screenSet() {
+     }
+ #else
+     field_0x38e8[2] = ((J2DTextBox*)field_0x160.pane)->getStringPtr();
++#endif
+ #endif
+     field_0x38e8[2][0] = '\0';
+ 
+@@ -2564,24 +2592,26 @@ void dFile_select_c::screenSet() {
+     fopMsgM_setPaneData(&field_0x3570, fileSel.Scr->search('retu'));
+     ((J2DTextBox*)field_0x3570.pane)->setFont(fileSel.font);
+ 
+-#if VERSION == VERSION_PAL
+-    char str3[10];
+-    for(i = 0; i < 10; i++) {
+-        str3[i] = 'A';
+-    }
+-    str3[9] = 0;
+-    ((J2DTextBox*)field_0x3228.pane)->setString(str3);
+-    field_0x3c94 = ((J2DTextBox*)field_0x3228.pane)->getStringPtr();
+-    ((J2DTextBox*)field_0x3340.pane)->setString(str3);
+-    field_0x3c98 = ((J2DTextBox*)field_0x3340.pane)->getStringPtr();
+-    ((J2DTextBox*)field_0x3458.pane)->setString(str3);
+-    field_0x3c9c = ((J2DTextBox*)field_0x3458.pane)->getStringPtr();
+-    ((J2DTextBox*)field_0x3688.pane)->setString(str3);
+-    field_0x3ca0 = ((J2DTextBox*)field_0x3688.pane)->getStringPtr();
+-    ((J2DTextBox*)field_0x37a0.pane)->setString(str3);
+-    field_0x3ca4 = ((J2DTextBox*)field_0x37a0.pane)->getStringPtr();
+-    ((J2DTextBox*)field_0x3570.pane)->setString(str3);
+-    field_0x3ca8 = ((J2DTextBox*)field_0x3570.pane)->getStringPtr();
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        char str3[10];
++        for(i = 0; i < 10; i++) {
++            str3[i] = 'A';
++        }
++        str3[9] = 0;
++        ((J2DTextBox*)field_0x3228.pane)->setString(str3);
++        field_0x3c94 = ((J2DTextBox*)field_0x3228.pane)->getStringPtr();
++        ((J2DTextBox*)field_0x3340.pane)->setString(str3);
++        field_0x3c98 = ((J2DTextBox*)field_0x3340.pane)->getStringPtr();
++        ((J2DTextBox*)field_0x3458.pane)->setString(str3);
++        field_0x3c9c = ((J2DTextBox*)field_0x3458.pane)->getStringPtr();
++        ((J2DTextBox*)field_0x3688.pane)->setString(str3);
++        field_0x3ca0 = ((J2DTextBox*)field_0x3688.pane)->getStringPtr();
++        ((J2DTextBox*)field_0x37a0.pane)->setString(str3);
++        field_0x3ca4 = ((J2DTextBox*)field_0x37a0.pane)->getStringPtr();
++        ((J2DTextBox*)field_0x3570.pane)->setString(str3);
++        field_0x3ca8 = ((J2DTextBox*)field_0x3570.pane)->getStringPtr();
++    }
+ #endif
+ 
+     JUtility::TColor b1 = ((J2DPicture*)field_0x3618.pane)->getBlack();
+@@ -2601,46 +2631,48 @@ void dFile_select_c::screenSet() {
+     JUtility::TColor w4 = ((J2DPicture*)field_0x3768.pane)->getWhite();
+     field_0x38d8[1] = w4;
+ 
+-#if VERSION == VERSION_PAL
+-    fopMsgM_setPaneData(&mLangBase[0], fileSel.Scr->search('lgk0'));
+-    fopMsgM_setPaneData(&mLangBase[1], fileSel.Scr->search('lg00'));
+-    fopMsgM_setPaneData(&mLangCursor[0], fileSel.Scr->search('3cu1'));
+-    fopMsgM_setPaneData(&mLangCursor[1], fileSel.Scr->search('3cu2'));
+-    fopMsgM_setPaneData(&mLangCursor[2], fileSel.Scr->search('4cu'));
+-    fopMsgM_setPaneData(&mLangPane[0], fileSel.Scr->search('dk00'));
+-    fopMsgM_setPaneData(&mLangPane[1], fileSel.Scr->search('d000'));
+-    fopMsgM_setPaneData(&mLangPane[2], fileSel.Scr->search('lang'));
+-    fopMsgM_setPaneData(&mLangPane[3], fileSel.Scr->search('lan2'));
+-    fopMsgM_setPaneData(&mLangName[0], fileSel.Scr->search('enp'));
+-    fopMsgM_setPaneData(&mLangName[1], fileSel.Scr->search('grp'));
+-    fopMsgM_setPaneData(&mLangName[2], fileSel.Scr->search('frp'));
+-    fopMsgM_setPaneData(&mLangName[3], fileSel.Scr->search('spp'));
+-    fopMsgM_setPaneData(&mLangName[4], fileSel.Scr->search('itp'));
+-    field_0x3cc8 = mLangCursor[0].pane->getRotate();
+-    field_0x3ccc = mLangCursor[1].pane->getRotate();
+-
+-    char str4[0x20];
+-    for(i = 0; i < 0x20; i++) {
+-        str4[i] = 'A';
+-    }
+-    str4[0x1F] = 0;
+-    ((J2DTextBox*)mLangCursor[2].pane)->setFont(fileSel.font);
+-    ((J2DTextBox*)mLangCursor[2].pane)->setString(str4);
+-    field_0x3cc0 = ((J2DTextBox*)mLangCursor[2].pane)->getStringPtr();
+-    field_0x3cc0[0] = '\0';
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        fopMsgM_setPaneData(&mLangBase[0], fileSel.Scr->search('lgk0'));
++        fopMsgM_setPaneData(&mLangBase[1], fileSel.Scr->search('lg00'));
++        fopMsgM_setPaneData(&mLangCursor[0], fileSel.Scr->search('3cu1'));
++        fopMsgM_setPaneData(&mLangCursor[1], fileSel.Scr->search('3cu2'));
++        fopMsgM_setPaneData(&mLangCursor[2], fileSel.Scr->search('4cu'));
++        fopMsgM_setPaneData(&mLangPane[0], fileSel.Scr->search('dk00'));
++        fopMsgM_setPaneData(&mLangPane[1], fileSel.Scr->search('d000'));
++        fopMsgM_setPaneData(&mLangPane[2], fileSel.Scr->search('lang'));
++        fopMsgM_setPaneData(&mLangPane[3], fileSel.Scr->search('lan2'));
++        fopMsgM_setPaneData(&mLangName[0], fileSel.Scr->search('enp'));
++        fopMsgM_setPaneData(&mLangName[1], fileSel.Scr->search('grp'));
++        fopMsgM_setPaneData(&mLangName[2], fileSel.Scr->search('frp'));
++        fopMsgM_setPaneData(&mLangName[3], fileSel.Scr->search('spp'));
++        fopMsgM_setPaneData(&mLangName[4], fileSel.Scr->search('itp'));
++        field_0x3cc8 = mLangCursor[0].pane->getRotate();
++        field_0x3ccc = mLangCursor[1].pane->getRotate();
++
++        char str4[0x20];
++        for(i = 0; i < 0x20; i++) {
++            str4[i] = 'A';
++        }
++        str4[0x1F] = 0;
++        ((J2DTextBox*)mLangCursor[2].pane)->setFont(fileSel.font);
++        ((J2DTextBox*)mLangCursor[2].pane)->setString(str4);
++        field_0x3cc0 = ((J2DTextBox*)mLangCursor[2].pane)->getStringPtr();
++        field_0x3cc0[0] = '\0';
+ 
+-    for(i = 0; i < 5; i++) {
+-        ((J2DTextBox*)mLangName[i].pane)->setFont(fileSel.font);
+-        ((J2DTextBox*)mLangName[i].pane)->setString(str4);
+-        field_0x3cac[i] = ((J2DTextBox*)mLangName[i].pane)->getStringPtr();
+-        field_0x3cac[i][0] = '\0';
+-    }
++        for(i = 0; i < 5; i++) {
++            ((J2DTextBox*)mLangName[i].pane)->setFont(fileSel.font);
++            ((J2DTextBox*)mLangName[i].pane)->setString(str4);
++            field_0x3cac[i] = ((J2DTextBox*)mLangName[i].pane)->getStringPtr();
++            field_0x3cac[i][0] = '\0';
++        }
+ 
+-    fopMsgM_messageGet(field_0x3cac[0], 0x38A5);
+-    fopMsgM_messageGet(field_0x3cac[1], 0x38A7);
+-    fopMsgM_messageGet(field_0x3cac[2], 0x38A6);
+-    fopMsgM_messageGet(field_0x3cac[3], 0x38A8);
+-    fopMsgM_messageGet(field_0x3cac[4], 0x38A9);
++        fopMsgM_messageGet(field_0x3cac[0], 0x38A5);
++        fopMsgM_messageGet(field_0x3cac[1], 0x38A7);
++        fopMsgM_messageGet(field_0x3cac[2], 0x38A6);
++        fopMsgM_messageGet(field_0x3cac[3], 0x38A8);
++        fopMsgM_messageGet(field_0x3cac[4], 0x38A9);
++    }
+ #endif
+ }
+ 
+@@ -2656,9 +2688,11 @@ void dFile_select_c::paneTransInit() {
+     PaneTranceRecInfo3(field_0x3930, g_fsHIO.field_0x13, 0.0f, g_fsHIO.field_0x1C, 0.0f, 0.0f, 1, 0);
+     PaneTranceMessageBase(field_0x3930, g_fsHIO.field_0x32, g_fsHIO.field_0x44, 0.0f, 0.0f, 0.0f, 1, 0);
+     PaneTranceRecBase(field_0x3930, g_fsHIO.field_0x2F, g_fsHIO.field_0x44, 0.0f, 0.0f, 0.0f, 1, 0);
+-#if VERSION == VERSION_PAL
+-    PaneTranceLanguage(field_0x3930, g_fsHIO.field_0x0C, g_fsHIO.field_0x18, 0.0f, 0.0f, 0.0f, 1, 0);
+-    PaneTranceLanguageBase(field_0x3930, g_fsHIO.field_0x28, 0.0f, 250.0f, 0.0f, 0.0f, 1, 0);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        PaneTranceLanguage(field_0x3930, g_fsHIO.field_0x0C, g_fsHIO.field_0x18, 0.0f, 0.0f, 0.0f, 1, 0);
++        PaneTranceLanguageBase(field_0x3930, g_fsHIO.field_0x28, 0.0f, 250.0f, 0.0f, 0.0f, 1, 0);
++    }
+ #endif
+     menuPaneMoveSet();
+     yesNoPaneMoveSet();
+@@ -3071,9 +3105,11 @@ int dFile_select_c::PaneTranceMessageBase(s16 param_1, u8 param_2, f32 param_3,
+ 
+     fopMsgM_setNowAlpha(&field_0x160, f31);
+     fopMsgM_setAlpha(&field_0x160);
+-#if VERSION == VERSION_PAL
+-    fopMsgM_setNowAlpha(&mMes2, f31);
+-    fopMsgM_setAlpha(&mMes2);
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        fopMsgM_setNowAlpha(&mMes2, f31);
++        fopMsgM_setAlpha(&mMes2);
++    }
+ #endif
+ 
+     for(int i = 0; i < 2; i++) {
+@@ -3248,6 +3284,9 @@ int dFile_select_c::PaneTranceBack(s16 param_1, u8 param_2, f32 param_3, f32 par
+ 
+ #if VERSION == VERSION_PAL
+ int dFile_select_c::PaneTranceLanguage(s16 param_1, u8 param_2, f32 param_3, f32 param_4, f32 param_5, f32 param_6, u8 param_7, int param_8) {
++#if COS_RUNTIME_REGION
++    if (REGION_USA) return 1;
++#endif
+     if(param_1 < 0) {
+         return 0;
+     }
+@@ -3274,6 +3313,9 @@ int dFile_select_c::PaneTranceLanguage(s16 param_1, u8 param_2, f32 param_3, f32
+ }
+ 
+ int dFile_select_c::PaneTranceLanguageBase(s16 param_1, u8 param_2, f32 param_3, f32 param_4, f32 param_5, f32 param_6, u8 param_7, int param_8) {
++#if COS_RUNTIME_REGION
++    if (REGION_USA) return 1;
++#endif
+     if(param_1 < 0) {
+         return 0;
+     }
+@@ -3347,52 +3389,56 @@ void dFile_select_c::displayInit() {
+     else if(mUseType == 1) {
+         fopMsgM_messageGet(field_0x38e8[field_0x392d], 0x4E);
+         field_0x392b = 0x1A;
+-#if VERSION == VERSION_PAL
+-        mLangPane[0].pane->hide();
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++        if (REGION_PAL) {
++            mLangPane[0].pane->hide();
++        }
+ #endif
+     }
+ 
+     field_0x630[8].pane->hide();
+-#if VERSION == VERSION_PAL
+-    changeMenuText();
++#if COS_RUNTIME_REGION || (VERSION == VERSION_PAL)
++    if (REGION_PAL) {
++        changeMenuText();
+ 
+-    switch(dComIfGs_getPalLanguage()) {
+-    case 0:
+-        ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language.bti", 0);
+-        break;
+-    case 1:
+-        ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_gm.bti", 0);
+-        break;
+-    case 2:
+-        ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_fr.bti", 0);
+-        break;
+-    case 3:
+-        ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_sp.bti", 0);
+-        break;
+-    case 4:
+-        ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_it.bti", 0);
+-        break;
+-    }
++        switch(dComIfGs_getPalLanguage()) {
++        case 0:
++            ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language.bti", 0);
++            break;
++        case 1:
++            ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_gm.bti", 0);
++            break;
++        case 2:
++            ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_fr.bti", 0);
++            break;
++        case 3:
++            ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_sp.bti", 0);
++            break;
++        case 4:
++            ((J2DPicture*)mLangPane[2].pane)->changeTexture("file_language_it.bti", 0);
++            break;
++        }
+ 
+-    if(dComIfGs_getPalLanguage() == 0) {
+-        field_0x160.pane->show();
+-        mMes2.pane->hide();
+-        field_0x38e8[2] = ((J2DTextBox*)field_0x160.pane)->getStringPtr();
+-    } else {
+-        mMes2.pane->show();
+-        field_0x160.pane->hide();
+-        field_0x38e8[2] = ((J2DTextBox*)mMes2.pane)->getStringPtr();
+-    }
+-    field_0x38e8[2][0] = 0;
++        if(dComIfGs_getPalLanguage() == 0) {
++            field_0x160.pane->show();
++            mMes2.pane->hide();
++            field_0x38e8[2] = ((J2DTextBox*)field_0x160.pane)->getStringPtr();
++        } else {
++            mMes2.pane->show();
++            field_0x160.pane->hide();
++            field_0x38e8[2] = ((J2DTextBox*)mMes2.pane)->getStringPtr();
++        }
++        field_0x38e8[2][0] = 0;
+ 
+-    mLangBase[0].pane->hide();
+-    field_0x3cd0 = 0;
+-    field_0x3cd2 = 0;
+-    field_0x3cd1 = 0;
+-    fopMsgM_setNowAlpha(&mLangPane[2], 1.0f);
+-    fopMsgM_setAlpha(&mLangPane[2]);
+-    fopMsgM_setNowAlpha(&mLangPane[3], 0.0f);
+-    fopMsgM_setAlpha(&mLangPane[3]);
++        mLangBase[0].pane->hide();
++        field_0x3cd0 = 0;
++        field_0x3cd2 = 0;
++        field_0x3cd1 = 0;
++        fopMsgM_setNowAlpha(&mLangPane[2], 1.0f);
++        fopMsgM_setAlpha(&mLangPane[2]);
++        fopMsgM_setNowAlpha(&mLangPane[3], 0.0f);
++        fopMsgM_setAlpha(&mLangPane[3]);
++    }
+ #endif
+ }
+ 
+@@ -3547,6 +3593,38 @@ void dFile_select_c::setSaveData() {
+             if(data[0x157] == 0) {
+                 fopMsgM_paneScaleXY(pane, g_fsHIO.field_0x54);
+ 
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++                fontSize.mSizeX = field_0x38e0.mSizeX * 0.9f;
++                fontSize.mSizeY = field_0x38e0.mSizeY * g_fsHIO.field_0x54;
++
++                switch(dComIfGs_getPalLanguage()) {
++                case 0:
++                    strcpy(field_0x38f4[i], "New Game");
++                    break;
++                case 1:
++                    strcpy(field_0x38f4[i], "Das Abenteuer beginnt...");
++                    break;
++                case 2:
++                    strcpy(field_0x38f4[i], "Nouvelle partie");
++                    break;
++                case 3:
++                    strcpy(field_0x38f4[i], "Nueva partida");
++                    break;
++                case 4:
++                    strcpy(field_0x38f4[i], "Nuovo gioco");
++                    break;
++                }
++}
++else {
++                fontSize.mSizeX = field_0x38e0.mSizeX * g_fsHIO.field_0x54;
++                fontSize.mSizeY = field_0x38e0.mSizeY * g_fsHIO.field_0x54;
++
++#if VERSION > VERSION_JPN
++                strcpy(field_0x38f4[i], "New Game");
++#endif
++}
++#else
+ #if VERSION == VERSION_PAL
+                 fontSize.mSizeX = field_0x38e0.mSizeX * 0.9f;
+                 fontSize.mSizeY = field_0x38e0.mSizeY * g_fsHIO.field_0x54;
+@@ -3575,6 +3653,7 @@ void dFile_select_c::setSaveData() {
+ #if VERSION > VERSION_JPN
+                 strcpy(field_0x38f4[i], "New Game");
+ #endif
++#endif
+ #endif
+ 
+                 ((J2DTextBox*)pane->pane)->setFontSize(fontSize);
+@@ -3641,6 +3720,39 @@ void dFile_select_c::setSaveData() {
+             fontSize.mSizeY = field_0x38e0.mSizeY * g_fsHIO.field_0x54;
+ #else
+             fontSize.mSizeY = field_0x38e0.mSizeY * g_fsHIO.field_0x54;
++#if COS_RUNTIME_REGION
++if (REGION_PAL) {
++            switch(dComIfGs_getPalLanguage()) {
++            case 0:
++                fontSize.mSizeX = field_0x38e0.mSizeX * 0.9f;
++                strcpy(field_0x38f4[i], "This data is corrupted.");
++                break;
++            case 1:
++                fontSize.mSizeX = field_0x38e0.mSizeX * 0.7f;
++                strcpy(field_0x38f4[i], "Dieser Spielstand ist beschadigt.");
++                field_0x38f4[i][27] = 0xE4;
++                break;
++            case 2:
++                fontSize.mSizeX = field_0x38e0.mSizeX * 0.8f;
++                strcpy(field_0x38f4[i], "Les donnees sont corrompues.");
++                field_0x38f4[i][8] = 0xE9;
++                break;
++            case 3:
++                fontSize.mSizeX = field_0x38e0.mSizeX * 0.9f;
++                strcpy(field_0x38f4[i], "Los datos estan danados.");
++                field_0x38f4[i][13] = 0xE1;
++                field_0x38f4[i][18] = 0xF1;
++                break;
++            case 4:
++                fontSize.mSizeX = field_0x38e0.mSizeX * 0.8f;
++                strcpy(field_0x38f4[i], "I dati di gioco sono corrotti.");
++                break;
++            }
++}
++else {
++            fontSize.mSizeX = field_0x38e0.mSizeX * 0.9f;
++}
++#else
+ #if VERSION == VERSION_PAL
+             switch(dComIfGs_getPalLanguage()) {
+             case 0:
+@@ -3672,9 +3784,12 @@ void dFile_select_c::setSaveData() {
+             fontSize.mSizeX = field_0x38e0.mSizeX * 0.9f;
+ #endif
+ #endif
++#endif
+ 
+-#if VERSION == VERSION_USA
+-            strcpy(field_0x38f4[i], "This data is corrupted.");
++#if COS_RUNTIME_REGION || (VERSION == VERSION_USA)
++            if (REGION_USA) {
++                strcpy(field_0x38f4[i], "This data is corrupted.");
++            }
+ #endif
+ 
+             ((J2DTextBox*)pane->pane)->setFontSize(fontSize);
