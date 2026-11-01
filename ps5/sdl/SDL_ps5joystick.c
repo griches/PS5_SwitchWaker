@@ -180,7 +180,8 @@ static void PS5_JoystickUpdate(SDL_Joystick *joystick)
 
     /* PS5_JoystickDetect polled the pads just before */
     if (!pad_player((int)joystick->instance_id - 1, &pad) || (pad.held & PAD_INTERCEPTED)) {
-        return;
+        /* Release old SDL state when the shell owns the pad or it disconnects. */
+        pad = (struct pad){0};
     }
     for (int i = 0; i < PS5_BUTTONS; i++) {
         SDL_SendJoystickButton(timestamp, joystick, (Uint8)i, (pad.held & ps5_buttons[i]) != 0);
