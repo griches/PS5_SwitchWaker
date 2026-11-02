@@ -4,6 +4,8 @@
 This records inputs, not proof that unvalidated caches or effects work on hardware.
 """
 import argparse
+import importlib.util
+import sys
 import hashlib
 import json
 import os
@@ -87,6 +89,30 @@ def public_radv_provenance(text):
                      ('revision', 'sdk', 'assertions', 'archive sha256') if key in fields)
 
 
+def verify_dependencies():
+    spec = importlib.util.spec_from_file_location('patches', ROOT / 'ps5/tools/manage-patches.py')
+    patches = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(patches)
+    patches.verify_dependencies()
+
+
+def verify_release_sources(record):
+    """Audit the current checkout without claiming a retrospective build-time audit."""
+    # A later clean checkout cannot undo a recorded failure for this binary.
+    # Ordinary builds have no build-time audit; packaging audits their checkout.
+    if record.get('dependency_audit') == 'full' and record.get('dependency_sources_verified') is not True:
+        raise RuntimeError('The packaged build failed its dependency audit; rebuild before releasing')
+    if record.get('port_revision') != revision(ROOT):
+        raise RuntimeError('Checkout differs from the packaged build; check out its commit or rebuild before releasing')
+    paths = {'switchwaker': 'vendor/switchwaker', 'aurora': '.deps/aurora',
+             'sdl': '.deps/SDL', 'dawn': '.deps/dawn',
+             'recompcore': '.deps/recompcore', 'decomp': '.deps/decomp'}
+    for name, path in paths.items():
+        if record.get('dependencies', {}).get(name, {}).get('revision') != revision(ROOT / path):
+            raise RuntimeError(f'{name} differs from the packaged build; rebuild before releasing')
+    verify_dependencies()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--full', action='store_true', help='audit dependency worktrees recursively (slower on shared filesystems)')
@@ -113,11 +139,18 @@ def main():
     provenance = args.archive.parent.parent / 'PROVENANCE.txt'
     if provenance.exists():
         external['radv_provenance'] = public_radv_provenance(provenance.read_text())
-    dirty = subprocess.check_output(['git', '-C', str(ROOT), 'status', '--porcelain', '--ignore-submodules=all', '--untracked-files=no'], text=True)
-    record = {'schema_version': 4, 'eboot_sha256': digest(args.output.parent / 'eboot.bin'), 'dependency_audit': 'full' if args.full else 'revisions-only', 'game_id': 'universal', 'supported_game_ids': ['GZLE01', 'GZLP01'], 'port_revision': revision(ROOT), 'port_tracked_worktree_dirty': bool(dirty.strip()),
+    dirty = subprocess.check_output(['git', '-C', str(ROOT), 'status', '--porcelain', '--ignore-submodules=all', '--untracked-files=normal'], text=True)
+    verified = False
+    if args.full and not dirty.strip():
+        try:
+            verify_dependencies()
+            verified = True
+        except (RuntimeError, OSError, subprocess.CalledProcessError):
+            print('Dependency source differs from recorded pins/patches; this build cannot be released. Export edits and rebuild.', file=sys.stderr)
+    record = {'schema_version': 5, 'dependency_sources_verified': verified if args.full else None, 'eboot_sha256': digest(args.output.parent / 'eboot.bin'), 'dependency_audit': 'full' if args.full else 'revisions-only', 'game_id': 'universal', 'supported_game_ids': ['GZLE01', 'GZLP01'], 'port_revision': revision(ROOT), 'port_tracked_worktree_dirty': bool(dirty.strip()),
               'dependencies': dependencies, 'external': external,
               'source_and_cache_sha256': inputs,
-              'note': 'Packaging input inventory; revisions-only mode does not audit dependency edits or nested checkouts. No runtime/cache validation is implied.'}
+              'note': 'Ordinary builds record dependency revisions only. Release packaging audits the current checkout against pins and patches; it does not retroactively verify compilation inputs. No runtime/cache validation is implied.'}
     args.output.write_text(json.dumps(record, indent=2, sort_keys=True) + '\n')
 
 

@@ -121,6 +121,16 @@ link_inputs = (ROOT / 'ps5/cmake/link-inputs.cmake').read_text().split('PROPERTY
 assert 'vendor/switchwaker/native/data/initial_pipeline_cache.db' in link_inputs
 print('Maintenance checks passed: dirty/nested source fingerprints, staged resources and input/render/link source guards.')
 
+# Port extensions and upstream readback commands share one FIFO namespace.
+# A duplicate opcode silently sends a command to the wrong decoder.
+import re
+gx_commands = (ROOT / '.deps/aurora/include/dolphin/gx/GXAurora.h').read_text()
+opcodes = {}
+for name, value in re.findall(r'^#define (GX_AURORA_\w+) (0x[0-9A-Fa-f]+)\s*$', gx_commands, re.MULTILINE):
+    code = int(value, 16)
+    assert code not in opcodes, f'FIFO opcode collision: {name} and {opcodes.get(code)}'
+    opcodes[code] = name
+
 assert 'ps5/assets/controller-ui/*' in (ROOT / 'ps5/cmake/link-inputs.cmake').read_text()
 
 # CMake tracks a real output published only after packaging succeeds.
@@ -139,13 +149,15 @@ assert 'fork:' not in public and 'host:' not in public and '/Users/' not in publ
 assert 'revision: ' + 'a' * 40 in public and 'archive sha256: ' + 'c' * 64 in public
 assert provenance.public_radv_provenance('revision: /home/private/work\nsdk: secret') == ''
 
-# Release metadata must describe the built executable, independent of current Git HEAD.
+# Release metadata describes the binary; release audits require its checkout.
 import json
 import sys
 release = (ROOT / 'ps5/tools/package-release.sh').read_text()
 release_metadata = release.split("<<'PYTHON'\n", 1)[1].split('\nPYTHON', 1)[0]
 with tempfile.TemporaryDirectory(prefix='ps5-release-metadata-') as temporary:
     app = Path(temporary)
+    # Stub the expensive checkout audit here; exercise its guards separately below.
+    (app / 'source-provenance.py').write_text('def verify_release_sources(record): pass\n')
     (app / 'eboot.bin').write_bytes(b'fixture executable')
     (app / 'sce_sys').mkdir()
     param = app / 'sce_sys/param.json'
@@ -153,6 +165,7 @@ with tempfile.TemporaryDirectory(prefix='ps5-release-metadata-') as temporary:
     record = {
         'port_revision': 'recorded-build-revision',
         'port_tracked_worktree_dirty': False,
+        'dependency_sources_verified': True,
         'eboot_sha256': provenance.digest(app / 'eboot.bin'),
         'dependencies': {'switchwaker': {'revision': 'recorded-upstream-revision'}},
         'external': {'vulkan_revision': 'recorded-vulkan', 'sdk_revision': 'recorded-sdk',
@@ -160,10 +173,15 @@ with tempfile.TemporaryDirectory(prefix='ps5-release-metadata-') as temporary:
     }
     def run_release_metadata():
         (app / 'BUILD_INPUTS.json').write_text(json.dumps(record))
-        return subprocess.run([sys.executable, '-c', release_metadata, str(app)],
+        return subprocess.run([sys.executable, '-c', release_metadata, str(app), str(app)],
                               capture_output=True, text=True)
     result = run_release_metadata()
     assert result.returncode == 0, result.stderr
+    record['dependency_sources_verified'] = False
+    assert run_release_metadata().returncode == 0
+    del record['dependency_sources_verified']
+    assert run_release_metadata().returncode == 0
+    record['dependency_sources_verified'] = True
     text = (app / 'SOURCE.txt').read_text()
     assert 'ProsperoWake, Build 38' in text
     assert result.stdout.strip() == '38'
@@ -196,6 +214,51 @@ with tempfile.TemporaryDirectory(prefix='ps5-release-metadata-') as temporary:
     record['port_tracked_worktree_dirty'] = False
     del record['eboot_sha256']
     assert run_release_metadata().returncode != 0
+assert 'hashlib.file_digest' not in release
 assert 'ProsperoWake-build-$build_number.zip' in release
 assert "'eboot_sha256': digest(args.output.parent / 'eboot.bin')" in (ROOT / 'ps5/tools/source-provenance.py').read_text()
 print('Release metadata passed: recorded revisions, executable identity and uncommitted-build rejection.')
+
+# The release audit must run even when old build metadata says it was verified.
+from unittest.mock import patch
+release_record = {'port_revision': 'same', 'dependencies': {
+    name: {'revision': 'same'} for name in
+    ('switchwaker', 'aurora', 'sdl', 'dawn', 'recompcore', 'decomp')}}
+with patch.object(provenance, 'revision', return_value='same'), \
+     patch.object(provenance, 'verify_dependencies') as audit:
+    provenance.verify_release_sources(release_record)
+    audit.assert_called_once()
+    audit.reset_mock()
+    for verified in (False, None):
+        failed = {**release_record, 'dependency_audit': 'full'}
+        if verified is not None:
+            failed['dependency_sources_verified'] = verified
+        try:
+            provenance.verify_release_sources(failed)
+        except RuntimeError as error:
+            assert 'failed its dependency audit' in str(error)
+        else:
+            raise AssertionError('Recorded build-time audit failure cleared by a later clean checkout')
+    audit.assert_not_called()
+    provenance.verify_release_sources({**release_record, 'dependency_audit': 'full',
+                                      'dependency_sources_verified': True})
+    audit.assert_called_once()
+    audit.reset_mock()
+    for bad in ({**release_record, 'port_revision': 'old'},
+                {**release_record, 'dependencies': {}}):
+        try:
+            provenance.verify_release_sources(bad)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('Mismatched release sources accepted')
+    audit.assert_not_called()
+    audit.side_effect = RuntimeError('dependency edits')
+    try:
+        provenance.verify_release_sources(release_record)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('Dependency audit failure ignored')
+
+assert 'PS5_FULL_PROVENANCE' not in package

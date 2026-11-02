@@ -77,6 +77,10 @@ try:
     os.replace(temporary, path)
 finally:
     temporary.unlink(missing_ok=True)
+header = path.parent / 'ps5_build_number.h'
+contents = f'#pragma once\n#define PS5_BUILD_NUMBER "{number}"\n'
+if not header.exists() or header.read_text() != contents:
+    header.write_text(contents)
 print(f'==> Build {number}')
 PY
     ;;

@@ -1,3 +1,4 @@
+#include "ps5_build_number.h"
 #include "pc/pc_menu_widgets.h"
 #include "pc/pc_menu_language.h"
 #include "pc/pc_disc_region.h"

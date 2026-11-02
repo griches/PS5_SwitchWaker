@@ -33,7 +33,7 @@ mkdir -p "$app/licenses"
 cp "$root/licenses/GPL-3.0.txt" "$root/licenses/MIT.txt" "$root/licenses/Zlib.txt" "$app/licenses/"
 cp "$root/LICENSING.md" "$app/licenses/LICENSING.md"
 # Describe the packaged binary, not whichever checkout happens to be current.
-build_number=$(python3 - "$app" <<'PYTHON'
+build_number=$(python3 - "$app" "$ps5/tools" <<'PYTHON'
 import hashlib
 import json
 import re
@@ -49,11 +49,24 @@ _, minor, patch = map(int, version.split('.'))
 build_number = minor * 1000 + patch
 record = json.loads((app / 'BUILD_INPUTS.json').read_text())
 with (app / 'eboot.bin').open('rb') as binary:
-    binary_hash = hashlib.file_digest(binary, 'sha256').hexdigest()
+    digest = hashlib.sha256()
+    for block in iter(lambda: binary.read(1024 * 1024), b''):
+        digest.update(block)
+    binary_hash = digest.hexdigest()
 if record.get('eboot_sha256') != binary_hash:
     raise SystemExit('Build metadata is missing or does not match eboot.bin; rebuild before packaging')
 if record.get('port_tracked_worktree_dirty', True):
     raise SystemExit('This executable was built with uncommitted source changes; commit and rebuild before releasing')
+# Audit only when creating a release, against the revision used by this binary.
+# Keep BUILD_INPUTS.json unchanged: this is not a build-time verification.
+import importlib.util
+spec = importlib.util.spec_from_file_location('provenance', Path(sys.argv[2]) / 'source-provenance.py')
+provenance = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(provenance)
+try:
+    provenance.verify_release_sources(record)
+except (RuntimeError, OSError) as error:
+    raise SystemExit(str(error)) from error
 lines = [f'ProsperoWake, Build {build_number}',
          'Unofficial PS5 homebrew. Not affiliated with Nintendo or Sony Interactive Entertainment.',
          '', 'Distributed under GPL-3.0; see licenses/LICENSING.md and licenses/GPL-3.0.txt.',
@@ -68,6 +81,7 @@ lines += [f"PS5_Vulkan: {external['vulkan_revision']}",
 if external.get('radv_provenance'):
     lines += ['', 'RADV build provenance:', external['radv_provenance'].rstrip()]
 lines += ['', 'BUILD_INPUTS.json records the source/patch hashes and the extent of the dependency audit.',
+          'Dependency checkout verified against pins and patches during release packaging.',
           'No disc image, save or HD texture pack is included. Supply a US or PAL disc image.',
           '', f'eboot.bin SHA-256: {binary_hash}', '']
 (app / 'SOURCE.txt').write_text('\n'.join(lines))

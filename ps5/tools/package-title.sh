@@ -86,9 +86,7 @@ cp --remove-destination "$root/licenses/Controller-prompts.txt" "$app/licenses/C
 mkdir -p "$app/res"
 python3 "$ps5/tools/make-div-table.py" "$work/link/llvm-pie.elf" "$app/res/div-table.bin" \
     --nm "$nm" --objdump "$objdump"
-audit_args=()
-[[ ${PS5_FULL_PROVENANCE:-0} != 1 ]] || audit_args+=(--full)
-python3 -B "$ps5/tools/source-provenance.py" "${audit_args[@]}" --output "$app/BUILD_INPUTS.json" \
+python3 -B "$ps5/tools/source-provenance.py" --output "$app/BUILD_INPUTS.json" \
     --vulkan "$vulkan" --archive "$archive" --sdk "$sdk"
 # Prepare debug artifacts before publishing the staged title.
 mkdir -p "$root/build"

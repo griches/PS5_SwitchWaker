@@ -1,21 +1,9 @@
 # PS5-owned code: explicit membership, compiled with the existing game adapter target.
 function(ps5_attach_game_features)
-    set(ps5_metadata "${CMAKE_BINARY_DIR}/param.json")
-    if(NOT EXISTS "${ps5_metadata}")
-        configure_file("${PS5_PORT_DIR}/ps5/sce_sys/param.json" "${ps5_metadata}" COPYONLY)
-    endif()
-    file(READ "${ps5_metadata}" ps5_menu_metadata)
-    string(JSON ps5_menu_version GET "${ps5_menu_metadata}" contentVersion)
-    # The package revision is the build number: 01.000.003 -> Build 3.
-    # build.sh advances this single version source before each build attempt.
-    if(NOT ps5_menu_version MATCHES "^[0-9]+\\.0*([0-9]+)\\.0*([0-9]+)$")
-        message(FATAL_ERROR "Invalid contentVersion in ps5/sce_sys/param.json")
-    endif()
-    math(EXPR ps5_build_number "${CMAKE_MATCH_1} * 1000 + ${CMAKE_MATCH_2}")
-    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-        "${ps5_metadata}")
+    # build.sh writes the menu version header alongside package metadata.
+    # A new build number changes one object, not the CMake configuration.
     set_property(SOURCE "${PS5_PORT_DIR}/ps5/src/presentation/pc_menu_widgets.cpp"
-        APPEND PROPERTY COMPILE_DEFINITIONS "PS5_BUILD_NUMBER=\"${ps5_build_number}\"")
+        APPEND PROPERTY INCLUDE_DIRECTORIES "${CMAKE_BINARY_DIR}")
     target_include_directories(cos_game_headers INTERFACE "${PS5_PORT_DIR}/ps5/include")
     if(NOT COS_RUNTIME_REGION OR NOT COS_VERSION EQUAL 3 OR NOT COS_GAME_ID STREQUAL "GZLP01")
         message(FATAL_ERROR "PS5 requires the universal PAL-layout configuration; use ps5/tools/build.sh")

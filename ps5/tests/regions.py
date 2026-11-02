@@ -68,6 +68,8 @@ if name == 'cmake':
     assert json.loads(metadata.read_text())['contentVersion'] == '01.000.003', 'tracked template must stay unchanged'
     generated_metadata = build / 'param.json'
     assert json.loads(generated_metadata.read_text())['contentVersion'] == '01.000.007'
+    version_header = build / 'ps5_build_number.h'
+    assert '#define PS5_BUILD_NUMBER "7"' in version_header.read_text()
     configurations = [args for name, args in events() if name == 'cmake']
     assert len(configurations) == 1
     args = configurations[0]
@@ -93,13 +95,21 @@ if name == 'cmake':
         assert bad.returncode != 0 and b'Region build modes were removed' in bad.stderr
     assert events() == before, 'obsolete modes must fail before invoking build tools'
     saved_version = generated_metadata.read_text()
+    saved_header = version_header.read_text()
     run('-n')
     assert generated_metadata.read_text() == saved_version, 'dry runs must not consume a build number'
+    assert version_header.read_text() == saved_header
     metadata.write_text(json.dumps({'contentVersion': '01.000.999', 'titleId': 'PPSA99309'}))
     run()
     assert json.loads(generated_metadata.read_text()) == {'contentVersion': '01.001.000', 'titleId': 'PPSA99309'}
+    assert '#define PS5_BUILD_NUMBER "1000"' in version_header.read_text()
+
+features = (ROOT / 'ps5/cmake/game-features.cmake').read_text()
+assert 'CMAKE_CONFIGURE_DEPENDS' not in features
+assert 'ps5_menu_metadata' not in features
 
 language = (ROOT / 'vendor/switchwaker/native/src/pc/features/pc_language.cpp').read_text()
 assert '#if VERSION == VERSION_PAL' in language and 'ps5_system_language()' in language
 assert '"COS_GAME_LANGUAGE"' in language and 'PC_SETTING_RESTART' in language
+
 print('Universal build checks passed: one configuration, preserved objects, rejected regional modes and PAL language wiring (mock tools only).')
