@@ -1,5 +1,5 @@
 diff --git a/native/include/pc/pc_settings.h b/native/include/pc/pc_settings.h
-index 4dc8bd76..fc7a7a1a 100644
+index 4dc8bd76addfccc56d393e73965d7ca9ce305293..fc7a7a1a6b24fea6a4974f4ab0ebc44c05db2380 100644
 --- a/native/include/pc/pc_settings.h
 +++ b/native/include/pc/pc_settings.h
 @@ -43,12 +43,24 @@ extern "C" {
@@ -40,7 +40,7 @@ index 4dc8bd76..fc7a7a1a 100644
  const char* pc_settings_path(void);
  
 diff --git a/native/src/pc/features/pc_precompile.cpp b/native/src/pc/features/pc_precompile.cpp
-index 28e98985..50285efc 100644
+index 28e98985b05bf914e1a0abab2f3852f6c9b1c9a8..50285efc13439635723f2255055282b0b727ca4c 100644
 --- a/native/src/pc/features/pc_precompile.cpp
 +++ b/native/src/pc/features/pc_precompile.cpp
 @@ -106,6 +106,9 @@
@@ -72,7 +72,7 @@ index 28e98985..50285efc 100644
  
  // Fed to the loading screen: its done and total counts, and whether it is finished.
 diff --git a/native/src/pc/features/pc_settings.cpp b/native/src/pc/features/pc_settings.cpp
-index bc750ae4..21439b02 100644
+index bc750ae44154d4eeb592bd0d972cdfcd42d66f71..f402c317b3dbd707871b36ffd5bf4a59d0b07a6b 100644
 --- a/native/src/pc/features/pc_settings.cpp
 +++ b/native/src/pc/features/pc_settings.cpp
 @@ -17,6 +17,7 @@
@@ -324,7 +324,7 @@ index bc750ae4..21439b02 100644
      e.registered = true;
      if (fresh) {
          s.order.push_back(desc->key);
-@@ -584,6 +740,9 @@ const char* pc_settings_get_mode(const char* key, PcOperationMode mode) {
+@@ -584,15 +740,22 @@ const char* pc_settings_get_mode(const char* key, PcOperationMode mode) {
  int pc_settings_set_mode(const char* key, PcOperationMode mode, const char* value) {
      State& s = st();
      Entry* e = find(key);
@@ -334,3 +334,37 @@ index bc750ae4..21439b02 100644
      if (e == nullptr || !e->registered || isLocked(key) || value == nullptr || mode < 0 || mode >= PC_MODES) {
          return -1;
      }
+     const std::string before = valueFor(key, s.lastMode);
+     const int slot = perMode(*e) ? 1 + mode : 0;
++    const std::string previous = e->stored[slot];
++    const bool had = e->has[slot];
+     e->stored[slot] = value;
+     e->has[slot] = true;
+-    if (!(e->desc.flags & PC_SETTING_NO_SAVE)) {
+-        writeFile();
++    if (!(e->desc.flags & PC_SETTING_NO_SAVE) && !writeFile()) {
++        e->stored[slot] = previous;
++        e->has[slot] = had;
++        return -1;
+     }
+     const std::string now = valueFor(key, s.lastMode);
+     if (now != before) {
+@@ -615,14 +778,16 @@ int pc_settings_clear(const char* key) {
+         return -1;
+     }
+     const std::string before = valueFor(key, s.lastMode);
++    const Entry previous = *e;
+     bool had = false;
+     for (int i = 0; i < kSlots; i++) {
+         had = had || e->has[i];
+         e->stored[i].clear();
+         e->has[i] = false;
+     }
+-    if (had && !(e->desc.flags & PC_SETTING_NO_SAVE)) {
+-        writeFile();
++    if (had && !(e->desc.flags & PC_SETTING_NO_SAVE) && !writeFile()) {
++        *e = previous;
++        return -1;
+     }
+     // valueFor now gives the platform's or the description's default: a value the file had at start
+     // is also in the environment (pc_settings_load_early), but fileSet keeps it from counting as the

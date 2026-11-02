@@ -136,6 +136,23 @@ int main(int argc, char** argv) {
     write(path, "COS_MENU_TRANSPARENCY=80\nCOS_HD_TEXTURES=0\nUNKNOWN=keep\n[dev]\nMESA_TEST=old\n");
     pc_settings_reload();
     assert(live == "80");
+    // Saving and clearing must report I/O errors without adopting unsaved values.
+    for (int failure = 0; failure < 3; ++failure) {
+        const auto saved = read(path);
+        const int beforeApplied = applied, beforeSubscribed = subscribed;
+        failRename = failure == 0;
+        failFlush = failure == 1;
+        if (failure == 2) std::filesystem::create_directory(path + ".tmp");
+        assert(pc_settings_set(transparency.key, "60") == -1);
+        expect(transparency.key, "80");
+        assert(live == "80" && applied == beforeApplied && subscribed == beforeSubscribed);
+        assert(pc_settings_clear(transparency.key) == -1);
+        expect(transparency.key, "80");
+        assert(live == "80" && applied == beforeApplied && subscribed == beforeSubscribed);
+        assert(read(path) == saved);
+        failRename = failFlush = false;
+        std::filesystem::remove_all(path + ".tmp");
+    }
     applied = subscribed = 0;
     assert(pc_settings_restore_defaults() == 0);
     expect("COS_MENU_TRANSPARENCY", "40"); expect("COS_HD_TEXTURES", "1");
@@ -148,7 +165,7 @@ int main(int argc, char** argv) {
     expect("COS_FB_SCALE", test == "locked" ? "9" : "0");
     assert(pc_settings_set("COS_HD_TEXTURES", "0") == 0);
     assert(read(path).find("UNKNOWN") == std::string::npos);
-    assert(read(path).find("[dev]") == std::string::npos);
+    assert(read(path).find("\n[dev]\n") == std::string::npos);
     std::filesystem::rename(path, path + ".reset-test");
     std::filesystem::create_directory(path);
     write(path + "/block", "keep");
