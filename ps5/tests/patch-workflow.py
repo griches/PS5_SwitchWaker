@@ -44,13 +44,53 @@ with tempfile.TemporaryDirectory(prefix='ps5-delivery-test-') as temporary:
     assert b'fixture-new.cpp' in overlay
     assert (repo / '.git/index').read_bytes() == before
     assert git('status', '--porcelain') == before_status
-    assert overlay == patches.generate('fixture', repo, pin, [upstream], folder)
+    for abbreviation in ('7', '12', '40'):
+        git('config', 'core.abbrev', abbreviation)
+        assert overlay == patches.generate('fixture', repo, pin, [upstream], folder)
     first = folder / 'first.patch'
     second = folder / 'second.patch'
     # Ordered prerequisite and PS5 overlay touch the same file.
     first.write_bytes(upstream.read_bytes())
     second.write_bytes(overlay)
     patches.verify_series('fixture', repo, pin, [], [(first, first.read_bytes()), (second, overlay)], folder)
+    # Exercise the release audit against the same materialized dependency.
+    # Only root discovery and the separate pin preflight are replaced by fixture data.
+    real_root, real_names = patches.ROOT, patches.NAMES
+    real_target, real_paths, real_git, real_run = patches.target, patches.overlay_paths, patches.git, subprocess.run
+    def audit_git(directory, *args, **kwargs):
+        if directory == folder and args == ('ls-files', '--stage', '-z'):
+            return f'160000 {pin} 0\tfixture\0'.encode()
+        return real_git(directory, *args, **kwargs)
+    def audit_run(command, **kwargs):
+        if len(command) > 1 and command[1] == str(folder / 'ps5/tools/setup-submodules.py'):
+            return subprocess.CompletedProcess(command, 0)
+        return real_run(command, **kwargs)
+    patches.ROOT, patches.NAMES = folder, ('fixture',)
+    patches.target = lambda name: (repo, pin, [upstream])
+    patches.overlay_paths = lambda name: [second]
+    patches.git, subprocess.run = audit_git, audit_run
+    try:
+        patches.verify_dependencies()
+        saved_source = source.read_bytes()
+        source.write_bytes(saved_source + b'unexported release edit\n')
+        try:
+            patches.verify_dependencies()
+            raise AssertionError('release audit accepted an unexported dependency edit')
+        except RuntimeError:
+            pass
+        source.write_bytes(saved_source)
+        patches.verify_dependencies()
+    finally:
+        patches.ROOT, patches.NAMES = real_root, real_names
+        patches.target, patches.overlay_paths = real_target, real_paths
+        patches.git, subprocess.run = real_git, real_run
+    (repo / 'unexported.cpp').write_text('must reject\n')
+    try:
+        patches.verify_series('fixture', repo, pin, [], [(first, first.read_bytes()), (second, overlay)], folder)
+        raise AssertionError('unexported source accepted')
+    except RuntimeError:
+        pass
+    (repo / 'unexported.cpp').unlink()
     try:
         patches.verify_series('fixture', repo, pin, [], [(second, overlay), (first, first.read_bytes())], folder)
         raise AssertionError('reordered dependent series accepted')

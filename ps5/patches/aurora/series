@@ -1,3 +1,4 @@
 010-ps5-platform.patch
+020-game-integration.patch
 030-renderer-integration.patch
 040-renderer-checks.patch

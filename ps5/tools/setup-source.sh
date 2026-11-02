@@ -9,8 +9,7 @@
 # Setup initializes missing checkouts once; populated builds need no network or disc:
 #
 #   .deps/aurora        Aurora at SwitchWaker's pin (native/cmake/Aurora.cmake),
-#                       with SwitchWaker's own patches (native/patches/aurora) and
-#                       then ps5/patches/aurora/series (the console's surface)
+#                       with ps5/patches/aurora/series (retained game fixes and PS5 integration)
 #   .deps/decomp        Asset-header source at game/UPSTREAM (also a submodule).
 #   .deps/recompcore    Dolphin's DSP HLE sources (native/tools/fetch_recompcore.sh)
 #   .deps/assets/<GAME_ID> regional metadata, merged into .deps/assets/universal;
@@ -27,7 +26,6 @@ deps="$root/.deps"
 
 # Missing submodules are initialized; populated trees are checked, never reset.
 python3 -B "$root/ps5/tools/setup-submodules.py" --group source
-python3 -B "$root/ps5/tools/prepare-source.py" --target switchwaker
 python3 -B "$root/ps5/tools/prepare-source.py" --target aurora
 
 # Both metadata tables feed the same PAL-layout executable.

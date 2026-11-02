@@ -269,3 +269,9 @@ assert 'visibility(center+normal*2.0,lightView)' in modules['kTorchShader']
 assert 'if (facing <= 0.0)' in modules['kTorchShader']
 assert 'uniform.data() + 28' in source
 print('Post-processing regression checks passed: crop sampling, depth separation, filter chain and post-upscale boundary.')
+
+# The image pass runs after the cropped viewport leaves scope. Only copied values survive.
+image_body = game_hooks.split('void pc_hd_visuals_finish_image() {', 1)[1].split('\n}', 1)[0]
+assert 'getCurrentViewport' not in image_body
+assert 'imageScissorValid = false;' in image_body
+assert 'imageScissor = {' in game_hooks.split('void pc_hd_visuals_finish() {', 1)[1].split('\n}', 1)[0]

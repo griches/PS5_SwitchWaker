@@ -1,5 +1,5 @@
 diff --git a/game/src/d/d_picture_box.cpp b/game/src/d/d_picture_box.cpp
-index 12a4faa5..503f1aef 100644
+index 12a4faa511b557c56a5934ce8b8c33d70d394f4e..503f1aefdf322abde401b5b89cc165bcc58e1854 100644
 --- a/game/src/d/d_picture_box.cpp
 +++ b/game/src/d/d_picture_box.cpp
 @@ -6,6 +6,10 @@
@@ -164,7 +164,7 @@ index 12a4faa5..503f1aef 100644
  }
  
 diff --git a/game/src/d/d_snap.cpp b/game/src/d/d_snap.cpp
-index ceb97228..3b050d3c 100644
+index ceb97228bd3dc3bb6f33470cdd35b262ccba295a..3b050d3c70555ecf8caca93491a2f619ee357a2b 100644
 --- a/game/src/d/d_snap.cpp
 +++ b/game/src/d/d_snap.cpp
 @@ -14,6 +14,8 @@
@@ -245,7 +245,7 @@ index ceb97228..3b050d3c 100644
      SetResult();
  #if TARGET_PC
 diff --git a/native/src/pc/game_hooks/pc_capture.cpp b/native/src/pc/game_hooks/pc_capture.cpp
-index f69fa4df..c82755a8 100644
+index f69fa4dfb62669368ecf1380878e7478f49f83f4..c82755a88aeee1938f10db89ec45ca7ac4554ba5 100644
 --- a/native/src/pc/game_hooks/pc_capture.cpp
 +++ b/native/src/pc/game_hooks/pc_capture.cpp
 @@ -18,6 +18,7 @@

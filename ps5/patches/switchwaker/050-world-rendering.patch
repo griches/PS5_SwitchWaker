@@ -1,5 +1,5 @@
 diff --git a/game/src/d/actor/d_a_lod_bg.cpp b/game/src/d/actor/d_a_lod_bg.cpp
-index eb4b1d8b..9511443c 100644
+index eb4b1d8b792599266970cb7ef2f8a8563110120e..9511443c2c3a711e621cfbc1f0dd23cca8f7480c 100644
 --- a/game/src/d/actor/d_a_lod_bg.cpp
 +++ b/game/src/d/actor/d_a_lod_bg.cpp
 @@ -13,6 +13,9 @@
@@ -121,7 +121,7 @@ index eb4b1d8b..9511443c 100644
  }
  
 diff --git a/game/src/m_Do/m_Do_graphic.cpp b/game/src/m_Do/m_Do_graphic.cpp
-index 07b287cb..2d869523 100644
+index 07b287cb84b92817342fd2b7292f4b2712021f8f..2d86952313aab664aa5905d309dcfa3240e483ed 100644
 --- a/game/src/m_Do/m_Do_graphic.cpp
 +++ b/game/src/m_Do/m_Do_graphic.cpp
 @@ -6,6 +6,10 @@
@@ -203,7 +203,7 @@ index 07b287cb..2d869523 100644
  
  #if TARGET_PC
 diff --git a/native/src/pc/game_hooks/pc_fps60_camera.cpp b/native/src/pc/game_hooks/pc_fps60_camera.cpp
-index 9ae77f3b..21764f3b 100644
+index 9ae77f3bf278d9f06556f85f86c695f7eb8c5e6e..21764f3be24d86992ff38f7f654e509359234228 100644
 --- a/native/src/pc/game_hooks/pc_fps60_camera.cpp
 +++ b/native/src/pc/game_hooks/pc_fps60_camera.cpp
 @@ -74,6 +74,10 @@ struct CamSnap {

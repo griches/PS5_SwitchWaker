@@ -56,8 +56,8 @@ struct pad {
  * 0's; the pad_player calls reach the others. */
 #define PAD_PLAYERS 4
 
-/* Open player 0's pad (the first user's), and every other signed-in user's;
- * false (and no input for player 0) when there is none. */
+/* Initialize the pad service and open signed-in users' controllers.
+ * True once the service is ready; absent devices are retried by pad_poll. */
 bool pad_open(void);
 /* Read every player's controller; *pad is player 0's. Call once a frame. */
 void pad_poll(struct pad *pad);

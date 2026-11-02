@@ -222,6 +222,7 @@ pad_scan(void)
 bool
 pad_open(void)
 {
+   if (pad_service) return true;
    for (int player = 0; player < PAD_PLAYERS; player++)
       pad_rest(&pad_states[player]);
    (void)sceUserServiceInitialize(NULL);
@@ -231,10 +232,10 @@ pad_open(void)
       return false;
    }
    pad_service = true;
-   const bool opened = pad_player_open(0, user, 10);
+   (void)pad_player_open(0, user, 10);
    pad_scan();
    pad_next_scan = now_seconds() + PAD_SCAN_SECONDS;
-   return opened;
+   return true; // Service is ready; pad_poll retries devices not yet available.
 }
 
 static float
@@ -250,6 +251,10 @@ stick(uint8_t value)
 static void
 pad_fill(const struct pad_player_state *state, struct pad *pad)
 {
+   if (state->last.buttons & PAD_INTERCEPTED) {
+      *pad = (struct pad){.held = PAD_INTERCEPTED};
+      return;
+   }
    const uint32_t before = pad->held;
    pad->held = state->handle >= 0 ? state->last.buttons : 0;
    pad->pressed = pad->held & ~before;
@@ -283,7 +288,7 @@ pad_poll(struct pad *pad)
             s->buttons, s->left_x, s->left_y, s->right_x, s->right_y, s->l2, s->r2,
             s->connected != 0, s->timestamp_us};
          state->connected = s->connected != 0;
-         if (s->connected && !(s->buttons & PAD_INTERCEPTED))
+         if (s->connected)
             state->last = *s;
       }
    }
@@ -306,7 +311,7 @@ bool
 pad_player(int player, struct pad *pad)
 {
    const struct pad_player_state *state = pad_state(player);
-   if (state == NULL) {
+   if (state == NULL || !state->connected) {
       struct pad_player_state rest;
       pad_rest(&rest);
       pad_fill(&rest, pad);

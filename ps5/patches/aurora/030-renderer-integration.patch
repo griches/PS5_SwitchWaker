@@ -1,8 +1,21 @@
 diff --git a/include/aurora/aurora.h b/include/aurora/aurora.h
-index 2b9f7d2..25506c9 100644
+index 2d6b6cf8755771d68db78478a741dbcce60e30d1..75f8f27372255dd079303da153310ce45ef87b65 100644
 --- a/include/aurora/aurora.h
 +++ b/include/aurora/aurora.h
-@@ -138,6 +138,28 @@ void aurora_shutdown();
+@@ -176,6 +176,12 @@ typedef struct {
+    */
+   uint32_t mem2Size;
+ 
++  /*
++   * Compile GX and clear pipelines synchronously: a draw whose pipeline is not built yet waits for
++   * it instead of being skipped for that frame (the default asynchronous mode). Every frame then
++   * shows every draw, as on the console, at the cost of a stall the first time a pipeline is used.
++   */
++  bool blockingPipelines;
+   AuroraSurfaceDesc surface;
+ } AuroraConfig;
+ 
+@@ -192,6 +198,92 @@ void aurora_shutdown();
  const AuroraEvent* aurora_update();
  bool aurora_begin_frame();
  void aurora_end_frame();
@@ -28,54 +41,393 @@ index 2b9f7d2..25506c9 100644
 +                           float near_plane, float sea_level, float seconds, float farPlane);
 +void aurora_set_sun_direction(float x, float y, float z);
 +void aurora_set_point_lights(const float* lights, uint32_t count);
- /**
-  * Asynchronous end of frame (SwitchWaker patch 0018), off by default. aurora_end_frame then returns without
-  * waiting for the GX FIFO worker to process the frame: the worker ends it (texture caches, the last render
++/**
++ * Asynchronous end of frame (SwitchWaker patch 0018), off by default. aurora_end_frame then returns without
++ * waiting for the GX FIFO worker to process the frame: the worker ends it (texture caches, the last render
++ * pass, the hand-off to the render worker) when it gets there, and begins the next. aurora_end_frame waits
++ * only while two ended frames are not yet done. Set between frames.
++ */
++void aurora_set_async_end_frame(bool enabled);
++bool aurora_get_async_end_frame();
++/**
++ * Waits for the frames the async end of frame has not yet ended on the GX FIFO worker. After it Aurora is as
++ * a synchronous aurora_end_frame leaves it: copy textures made, the frame queued to the render worker (so
++ * work queued there afterwards, such as a readback, runs behind it). Returns at once otherwise.
++ */
++void aurora_frame_sync();
++
++/**
++ * GX FIFO translation profile (SwitchWaker patch 0020): a sampling profile of the thread translating the GX
++ * stream (the FIFO worker in Thread mode). The values below AURORA_FIFO_PROFILE_CATEGORIES are running
++ * totals of sampled wall time (ns) the translating thread spent per category (innermost wins); the rest
++ * are counts and byte totals. Off by default (nothing stored, no sampler thread); aurora_fifo_profile_get
++ * fills up to `count` values indexed by AuroraFifoProfileValue.
++ */
++typedef enum {
++  AURORA_FIFO_PROFILE_IDLE,      /* the worker waiting for commands or jobs */
++  AURORA_FIFO_PROFILE_PROCESS,   /* fifo::process outside the categories below (command parsing) */
++  AURORA_FIFO_PROFILE_JOB,       /* frame jobs (async begin/end of frame: textures, last pass, hand-off) */
++  AURORA_FIFO_PROFILE_BP,        /* BP register loads */
++  AURORA_FIFO_PROFILE_XF,        /* XF register loads, immediate and indexed (matrices, lights) */
++  AURORA_FIFO_PROFILE_CP,        /* CP register loads */
++  AURORA_FIFO_PROFILE_AURORA,    /* Aurora subcommands except the draws (texture objects, arrays, ...) */
++  AURORA_FIFO_PROFILE_DRAW,      /* draws outside the parts below: vertices, indices, merging */
++  AURORA_FIFO_PROFILE_PIPELINE,  /* draw: pipeline config and shader info */
++  AURORA_FIFO_PROFILE_PIPELINE_LOOKUP, /* draw: pipeline_ref (the pipeline cache's hashes and locks) */
++  AURORA_FIFO_PROFILE_TEXTURES,  /* draw: sampled textures resolved */
++  AURORA_FIFO_PROFILE_BIND,      /* draw: bind group (samplers, the bind group cache) */
++  AURORA_FIFO_PROFILE_UNIFORM,   /* draw: uniform build */
++  AURORA_FIFO_PROFILE_ARRAYS,    /* draw: indexed vertex arrays copied to storage */
++  AURORA_FIFO_PROFILE_COMMAND,   /* draw: the draw command recorded */
++  AURORA_FIFO_PROFILE_CATEGORIES,
++  AURORA_FIFO_PROFILE_SAMPLES = AURORA_FIFO_PROFILE_CATEGORIES,
++  AURORA_FIFO_PROFILE_DRAWS,     /* draws recorded (not merged) */
++  AURORA_FIFO_PROFILE_MERGED,    /* draws merged into the previous one */
++  AURORA_FIFO_PROFILE_PIPELINES, /* pipeline lookups */
++  AURORA_FIFO_PROFILE_BINDS,     /* bind group builds */
++  AURORA_FIFO_PROFILE_UNIFORMS,  /* uniform builds */
++  AURORA_FIFO_PROFILE_UNIFORM_BYTES,
++  AURORA_FIFO_PROFILE_VERTEX_BYTES,
++  AURORA_FIFO_PROFILE_ARRAY_BYTES,
++  AURORA_FIFO_PROFILE_STREAM_BYTES, /* GX stream bytes translated */
++  AURORA_FIFO_PROFILE_BP_LOADS,
++  AURORA_FIFO_PROFILE_XF_LOADS,
++  AURORA_FIFO_PROFILE_PIPELINE_MEMO_HITS, /* pipeline lookups answered by patch 0021's memo */
++  AURORA_FIFO_PROFILE_BIND_MEMO_HITS,     /* bind group builds answered by patch 0021's memo */
++  AURORA_FIFO_PROFILE_COUNT
++} AuroraFifoProfileValue;
++void aurora_fifo_profile_enable(bool enabled);
++void aurora_fifo_profile_get(uint64_t* out, size_t count);
++/**
++ * GX FIFO translation fast paths (SwitchWaker patch 0021), on by default: a per-frame memo of pipeline
++ * lookups (repeated draw states skip the shader info, the cache hashes and locks) and indices of merged
++ * primitives written straight into the frame's index buffer. Off = Aurora's original paths (A/B checks).
++ * Set between frames.
++ */
++void aurora_set_fifo_fast_paths(bool enabled);
+ 
+ void aurora_set_log_level(AuroraLogLevel level);
+ void aurora_set_pause_on_focus_lost(bool value);
+diff --git a/lib/gfx/efb.cpp b/lib/gfx/efb.cpp
+index 67643114116a463c76260729969bf8309a80955f..79fc14652aa099626ae81838d2a8afb45248f3c5 100644
+--- a/lib/gfx/efb.cpp
++++ b/lib/gfx/efb.cpp
+@@ -16,6 +16,7 @@ AuroraWindowSize g_displaySize{};
+ std::optional<State> g_applied;
+ float g_scale = 0.f;
+ bool g_aspectFit = false;
++float g_fitAspect = 0.f;
+ 
+ uint32_t extent(double value) {
+   return static_cast<uint32_t>(std::clamp(std::round(value), 1.0, static_cast<double>(UINT32_MAX)));
+@@ -35,7 +36,7 @@ AuroraWindowSize display_size(uint32_t width, uint32_t height, float scale) {
+ } // namespace
+ 
+ AuroraWindowSize calculate_size(AuroraWindowSize size, uint32_t baseWidth, uint32_t baseHeight,
+-                                float frameBufferScale, bool aspectFit) noexcept {
++                                float frameBufferScale, bool aspectFit, float fitAspect) noexcept {
+   baseWidth = std::max(1u, baseWidth);
+   baseHeight = std::max(1u, baseHeight);
+   if (!std::isfinite(size.scale) || size.scale <= 0.f) {
+@@ -50,17 +51,19 @@ AuroraWindowSize calculate_size(AuroraWindowSize size, uint32_t baseWidth, uint3
+   if (size.height == 0) {
+     size.height = extent(nativeHeight / static_cast<double>(size.scale));
+   }
+-  const double baseAspect = static_cast<double>(baseWidth) / baseHeight;
++  const double baseAspect = aspectFit && std::isfinite(fitAspect) && fitAspect > 0.f
++      ? fitAspect : static_cast<double>(baseWidth) / baseHeight;
+   const double nativeAspect = static_cast<double>(nativeWidth) / nativeHeight;
+ 
+   if (std::isfinite(frameBufferScale) && frameBufferScale > 0.f) {
+     size.fb_width = extent(baseWidth * static_cast<double>(frameBufferScale));
+     size.fb_height = extent(baseHeight * static_cast<double>(frameBufferScale));
+-    if (!aspectFit) {
+-      if (nativeAspect >= baseAspect) {
+-        size.fb_width = extent(size.fb_height * nativeAspect);
++    if (!aspectFit || fitAspect > 0.f) {
++      const double targetAspect = aspectFit ? baseAspect : nativeAspect;
++      if (targetAspect >= static_cast<double>(baseWidth) / baseHeight) {
++        size.fb_width = extent(size.fb_height * targetAspect);
+       } else {
+-        size.fb_height = extent(size.fb_width / nativeAspect);
++        size.fb_height = extent(size.fb_width / targetAspect);
+       }
+     }
+   } else {
+@@ -84,6 +87,7 @@ void initialize(const AuroraSurfaceDesc& desc) {
+   g_applied.reset();
+   g_scale = 0.f;
+   g_aspectFit = false;
++  g_fitAspect = 0.f;
+ }
+ 
+ void shutdown() {
+@@ -117,10 +121,18 @@ bool set_aspect_fit(bool fit) {
+   return true;
+ }
+ 
++bool set_fit_aspect(float aspect) {
++  std::lock_guard lock{g_configMutex};
++  aspect = std::isfinite(aspect) ? std::max(0.f, aspect) : 0.f;
++  if (g_fitAspect == aspect) return false;
++  g_fitAspect = aspect;
++  return true;
++}
++
+ AuroraWindowSize resolve_size(AuroraWindowSize size) {
+   const auto [baseWidth, baseHeight] = vi::configured_fb_size();
+   std::lock_guard lock{g_configMutex};
+-  return calculate_size(size, baseWidth, baseHeight, g_scale, g_aspectFit);
++  return calculate_size(size, baseWidth, baseHeight, g_scale, g_aspectFit, g_fitAspect);
+ }
+ 
+ AuroraWindowSize pending_size() {
+@@ -137,7 +149,7 @@ AuroraWindowSize pending_size() {
+     }
+   }
+ 
+-  return calculate_size(size, baseWidth, baseHeight, g_scale, g_aspectFit);
++  return calculate_size(size, baseWidth, baseHeight, g_scale, g_aspectFit, g_fitAspect);
+ }
+ 
+ AuroraWindowSize applied_size() {
+@@ -177,7 +189,7 @@ State prepare_frame(bool commit) {
+         size.native_fb_height = baseHeight;
+       }
+     }
+-    size = calculate_size(size, baseWidth, baseHeight, g_scale, g_aspectFit);
++    size = calculate_size(size, baseWidth, baseHeight, g_scale, g_aspectFit, g_fitAspect);
+   }
+ 
+   webgpu::resize_efb(size.fb_width, size.fb_height);
+diff --git a/lib/gfx/efb.hpp b/lib/gfx/efb.hpp
+index 98f4951e5566cb6a335234b22830505beeadfacd..10d97cca13922f2bbfe8dff5486c1e6e795701de 100644
+--- a/lib/gfx/efb.hpp
++++ b/lib/gfx/efb.hpp
+@@ -28,9 +28,10 @@ AuroraWindowSize applied_size();
+ AuroraWindowSize pending_size();
+ AuroraWindowSize resolve_size(AuroraWindowSize size);
+ AuroraWindowSize calculate_size(AuroraWindowSize size, uint32_t baseWidth, uint32_t baseHeight,
+-                                float frameBufferScale, bool aspectFit) noexcept;
++                                float frameBufferScale, bool aspectFit, float fitAspect = 0.f) noexcept;
+ void set_display_size(uint32_t width, uint32_t height, float scale);
+ bool set_scale(float scale);
+ bool set_aspect_fit(bool fit);
++bool set_fit_aspect(float aspect);
+ 
+ } // namespace aurora::gfx::efb
 diff --git a/lib/gfx/encoding.cpp b/lib/gfx/encoding.cpp
-index e0081a3..261e4aa 100644
+index 7cc8b88b7c675c80f14b3f8812f18609a8fe924a..bbf75d30cd67f7c4275dffdd6c1c45b8274f1acc 100644
 --- a/lib/gfx/encoding.cpp
 +++ b/lib/gfx/encoding.cpp
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
++#include "depth_peek.hpp"
  #include "encoding.hpp"
 +#include "post_fx.hpp"
  
  #include "frame.hpp"
  
-@@ -280,9 +281,23 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
-   if (frame.census)
-     UNLIKELY { census_pass_row(frame, passInfo, label); }
+@@ -18,6 +20,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
++#include <cmath>
+ #include <cstring>
+ #include <string>
+ #include <utility>
+@@ -155,7 +158,12 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+     case CommandType::Draw: {
+       auto& draw = cmd.data.draw;
+       if (draw.encoder != nullptr) {
++        const bool counted = frame.census && cmd.censusIndex < frame.census->capacity;
++        if (counted)
++          UNLIKELY { pass.BeginOcclusionQuery(cmd.censusIndex); }
+         draw.encoder(draw.payload.data(), pass, passInfo);
++        if (counted)
++          UNLIKELY { pass.EndOcclusionQuery(); }
+       }
+     } break;
+     case CommandType::CustomDraw: {
+@@ -171,9 +179,8 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+       }
+     } break;
+     case CommandType::DebugMarker: {
+-#if defined(AURORA_GFX_DEBUG_GROUPS)
++      // Always encoded (native/patches/aurora/0008): the Switch's Dawn GL times draw groups by them.
+       pass.InsertDebugMarker(wgpu::StringView(frame.debugMarkers[cmd.data.debugMarkerIndex]));
+-#endif
+     } break;
+     }
+   }
+@@ -185,6 +192,33 @@ void render_pass(const wgpu::RenderPassEncoder& pass, FramePacket& frame, Render
+ #endif
+ }
+ 
++// Draw census (census.hpp): one CSV row per pass with its targets, load ops, draws and EFB copy.
++void census_pass_row(FramePacket& frame, const RenderPass& passInfo, const std::string& label) {
++  const auto& color = passInfo.colorAttachments[SceneColorAttachmentIndex];
++  uint32_t draws = 0;
++  for (const auto& c : passInfo.commands) {
++    draws += c.type == CommandType::Draw || c.type == CommandType::CustomDraw ? 1 : 0;
++  }
++  const wgpu::LoadOp colorLoad =
++      color.loadOp != wgpu::LoadOp::Undefined ? color.loadOp : (color.clear ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load);
++  std::string resolve = "none";
++  std::string detail;
++  if (passInfo.resolveTarget) {
++    const auto& dst = passInfo.resolveTarget->size;
++    resolve = fmt::format("{}x{}", dst.width, dst.height);
++    detail = fmt::format("fmt {} src {}x{}+{}+{}{}", static_cast<int>(passInfo.resolveFormat),
++                         passInfo.resolveRect.width, passInfo.resolveRect.height, passInfo.resolveRect.x,
++                         passInfo.resolveRect.y, gx::is_depth_format(passInfo.resolveFormat) ? " depth" : "");
++  }
++  if (passInfo.snapshotColorDst || passInfo.snapshotDepthDst || passInfo.snapshotNormalDst) {
++    detail += " snapshot";
++  }
++  frame.census->passes.push_back(fmt::format("{},pass,{},{},{},{},{},{},{},{}", frame.census->passes.size(), label,
++                                             color.size.width, color.size.height, passInfo.colorAttachmentCount,
++                                             colorLoad == wgpu::LoadOp::Clear ? "clear" : "load", draws, resolve,
++                                             detail));
++}
++
+ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo, uint32_t passIndex) {
+   ZoneScoped;
+   if (!passInfo.sealed) {
+@@ -242,12 +276,41 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
+       .colorAttachmentCount = passInfo.colorAttachmentCount,
+       .colorAttachments = attachments.data(),
+       .depthStencilAttachment = depthStencilAttachmentPtr,
++      .occlusionQuerySet = frame.census ? frame.census->querySet : nullptr,
+       .timestampWrites = webgpu::gpu_prof::pass_writes(label),
+   };
++  if (frame.census)
++    UNLIKELY { census_pass_row(frame, passInfo, label); }
  
 +  const auto& scene = passInfo.colorAttachments[SceneColorAttachmentIndex];
    auto pass = cmd.BeginRenderPass(&renderPassDescriptor);
    render_pass(pass, frame, passInfo);
    pass.End();
 +  if (passInfo.applyPostEffects && !frame.postEffectsApplied && passInfo.postEffects.any() &&
-+      scene.view.Get() == webgpu::g_frameBuffer.view.Get()) {
++      scene.view.Get() == frame.efb.color.view.Get()) {
 +    post_fx::encode(cmd, passInfo.copySourceTexture, passInfo.copySourceView, passInfo.copySourceDepthView, scene.size,
 +                    scene.format, scene.view, scene.resolveView, passInfo.msaaSamples, passInfo.postEffects);
 +    frame.postEffectsApplied = true;
 +  }
 +
 +  if (passInfo.applyImageEffects && !frame.imageEffectsApplied && passInfo.postEffects.image() &&
-+      scene.view.Get() == webgpu::g_frameBuffer.view.Get()) {
++      scene.view.Get() == frame.efb.color.view.Get()) {
 +    post_fx::encode_image_filters(cmd, passInfo.copySourceTexture, scene.size, scene.format,
 +        scene.view, scene.resolveView, passInfo.msaaSamples, passInfo.postEffects);
 +    frame.imageEffectsApplied = true;
 +  }
++
++  if (passInfo.captureDepthSnapshot) {
++    // native/patches/aurora/0009: with an EFB content scale the depth is in the top-left part.
++    auto snapshotSize = passInfo.colorAttachments[SceneColorAttachmentIndex].size;
++    if (passInfo.depthSnapshotScale < 1.f) {
++      snapshotSize.width = std::max<uint32_t>(
++          1, static_cast<uint32_t>(std::lround(static_cast<float>(snapshotSize.width) * passInfo.depthSnapshotScale)));
++      snapshotSize.height = std::max<uint32_t>(
++          1, static_cast<uint32_t>(std::lround(static_cast<float>(snapshotSize.height) * passInfo.depthSnapshotScale)));
++    }
++    depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView, snapshotSize, passInfo.msaaSamples);
++  }
  
-   if (passInfo.captureDepthSnapshot) {
-     // native/patches/aurora/0009: with an EFB content scale the depth is in the top-left part.
+   if (passInfo.resolveTarget) {
+     const auto& dstSize = passInfo.resolveTarget->size;
+@@ -407,6 +470,11 @@ void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op)
+     break;
+   case FrameOpType::TextureCopy:
+     if (op.textureCopy != nullptr) {
++      if (frame.census)
++        UNLIKELY {
++          frame.census->passes.push_back(fmt::format("{},copy,texture copy,{},{},0,,0,,", frame.census->passes.size(),
++                                                     op.textureCopy->size.width, op.textureCopy->size.height));
++        }
+       const webgpu::gpu_prof::Zone zone{cmd, "Texture copy"};
+       cmd.CopyTextureToTexture(&op.textureCopy->src, &op.textureCopy->dst, &op.textureCopy->size);
+     }
 diff --git a/lib/gfx/frame.cpp b/lib/gfx/frame.cpp
-index 18b1edb..d1baed8 100644
+index 82e25ea21cd7db4cba3820dcfad365113b87ef0e..32fa0c8ed953a31d8d4df644db0b2a9c2757b51e 100644
 --- a/lib/gfx/frame.cpp
 +++ b/lib/gfx/frame.cpp
-@@ -1,4 +1,5 @@
+@@ -1,4 +1,6 @@
++#include "depth_peek.hpp"
  #include "frame.hpp"
 +#include "post_fx.hpp"
  
- #include "depth_peek.hpp"
  #include "pipeline_cache.hpp"
-@@ -545,6 +546,7 @@ void initialize() {
+ #include "readback/readback.hpp"
+@@ -9,6 +11,7 @@
+ #include "tex_palette_conv.hpp"
+ #include "texture_replacement.hpp"
+ #include "../gx/gx.hpp"
++#include "../gx/fifo.hpp"
+ #ifdef AURORA_ENABLE_RMLUI
+ #include "../rmlui/pipeline.hpp"
+ #endif
+@@ -400,6 +403,7 @@ void initialize() {
+   //   }
+   // });
+   readback::initialize();
++  depth_peek::initialize();
+   tex_copy_conv::initialize();
+   tex_palette_conv::initialize();
+ 
+@@ -439,7 +443,7 @@ void initialize() {
+   }
+ 
+   {
+-    constexpr std::array layoutEntries{
++    std::array layoutEntries{
+         // Vertex data buffer
+         wgpu::BindGroupLayoutEntry{
+             .binding = 0,
+@@ -459,13 +463,27 @@ void initialize() {
+                 },
+         },
+     };
++    // Draw census fragment counters (census.hpp), only with AURORA_DRAW_CENSUS=1.
++    const bool censusCounters = census::counters_enabled();
++    const wgpu::BindGroupLayoutEntry censusLayoutEntry{
++        .binding = 2,
++        .visibility = wgpu::ShaderStage::Fragment,
++        .buffer =
++            wgpu::BufferBindingLayout{
++                .type = wgpu::BufferBindingType::Storage,
++            },
++    };
++    std::vector<wgpu::BindGroupLayoutEntry> layoutList(layoutEntries.begin(), layoutEntries.end());
++    if (censusCounters) {
++      layoutList.push_back(censusLayoutEntry);
++    }
+     const wgpu::BindGroupLayoutDescriptor layoutDesc{
+         .label = "Static bind group layout",
+-        .entryCount = layoutEntries.size(),
+-        .entries = layoutEntries.data(),
++        .entryCount = layoutList.size(),
++        .entries = layoutList.data(),
+     };
+     g_resources.staticBindGroupLayout = g_device.CreateBindGroupLayout(&layoutDesc);
+-    const std::array entries{
++    std::vector<wgpu::BindGroupEntry> entries{
+         wgpu::BindGroupEntry{
+             .binding = 0,
+             .buffer = g_resources.vertexBuffer,
+@@ -475,6 +493,12 @@ void initialize() {
+             .buffer = g_resources.storageBuffer,
+         },
+     };
++    if (censusCounters) {
++      entries.push_back(wgpu::BindGroupEntry{
++          .binding = 2,
++          .buffer = census::counter_buffer(),
++      });
++    }
+     const wgpu::BindGroupDescriptor bindGroupDescriptor{
+         .label = "Static bind group",
+         .layout = g_resources.staticBindGroupLayout,
+@@ -524,6 +548,7 @@ void initialize() {
    rmlui::initialize_pipeline();
  #endif
    initialize_pipeline_cache();
@@ -83,19 +435,57 @@ index 18b1edb..d1baed8 100644
  }
  
  void shutdown() {
-@@ -559,6 +561,7 @@ void shutdown() {
+@@ -538,8 +563,10 @@ void shutdown() {
      std::lock_guard lock{g_presentStatsMutex};
      g_presentTimes.clear();
    }
 +  post_fx::shutdown();
    shutdown_pipeline_cache();
-   depth_peek::shutdown();
+   readback::shutdown();
++  depth_peek::shutdown();
    tex_copy_conv::shutdown();
+   tex_palette_conv::shutdown();
+   texture_replacement::shutdown();
+@@ -690,6 +717,12 @@ void end_frame(EndFrameCallback callback) {
+     auto encoder = std::move(packet.encoder);
+     const auto stats = packet.stats;
+     auto afterSubmitCallbacks = std::move(packet.afterSubmitCallbacks);
++    if (auto census = std::move(packet.census))
++      UNLIKELY {
++        // Draw census (census.hpp): resolve the frame's occlusion queries, read them after submit.
++        census::encode_resolve(encoder, census);
++        afterSubmitCallbacks.emplace_back([census] { census::after_submit(census); });
++      }
+     g_resources.stats.drawCallCount = stats.drawCallCount;
+     g_resources.stats.mergedDrawCallCount = stats.mergedDrawCallCount;
+     g_resources.stats.lastVertSize = stats.lastVertSize;
+@@ -705,6 +738,7 @@ void end_frame(EndFrameCallback callback) {
+     }
+     webgpu::gpu_prof::frame_end();
+     webgpu::gpu_prof::after_submit();
++    depth_peek::after_submit();
+     packet = {};
+     g_frameSlots.release(frameSlot);
+     expire_cached_bind_groups();
+@@ -715,7 +749,12 @@ void end_frame(EndFrameCallback callback) {
+ 
+ uint32_t current_frame() noexcept { return g_frameIndex; }
+ 
+-void gpu_synchronize() { render_worker::synchronize(); }
++void gpu_synchronize() {
++  // With the async end of frame (patch 0018) the GX FIFO worker may still be ending frames: surface and
++  // swapchain changes wait for those to be queued to the render worker first.
++  gx::fifo::sync();
++  render_worker::synchronize();
++}
+ 
+ void synchronize() { render_worker::synchronize(); }
+ 
 diff --git a/lib/gfx/frame_packet.hpp b/lib/gfx/frame_packet.hpp
-index e36891e..6d03965 100644
+index 86355402c8de9192366b2dc002d053cbe0c4d168..da7444503daecd0fd32ee93922d91adf4d23c6f5 100644
 --- a/lib/gfx/frame_packet.hpp
 +++ b/lib/gfx/frame_packet.hpp
-@@ -1,6 +1,7 @@
+@@ -1,9 +1,11 @@
  #pragma once
  
  #include "pipeline_cache.hpp"
@@ -103,17 +493,55 @@ index e36891e..6d03965 100644
  #include "types.hpp"
  #include "tex_palette_conv.hpp"
  #include "texture.hpp"
-@@ -112,6 +113,9 @@ struct RenderPass {
-   bool captureDepthSnapshot = false;
-   float depthSnapshotScale = 1.f; // native/patches/aurora/0009: the EFB part the depth was drawn in
++#include "census.hpp"
+ #include "efb.hpp"
+ 
+ #include <array>
+@@ -53,6 +55,8 @@ enum class CommandType {
+ 
+ struct Command {
+   CommandType type;
++  // Draw census (census.hpp): the draw's index in the frame's capture, UINT32_MAX when none.
++  uint32_t censusIndex = UINT32_MAX;
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+   std::vector<std::string> debugGroupStack;
+ #endif
+@@ -111,13 +115,19 @@ struct RenderPass {
+   bool hasStencil = false;
+   bool hasDraws = false;
+   bool discardable = false;
++  bool captureDepthSnapshot = false;
++  float depthSnapshotScale = 1.f; // native/patches/aurora/0009: the EFB part the depth was drawn in
    bool sealed = false;
 +  post_fx::State postEffects;
 +  bool applyImageEffects = false; // post-upscale, before HUD
 +  bool applyPostEffects = false; // explicit end-of-world boundary from the game
+   bool presentConsumer = false;
    std::vector<tex_palette_conv::ConvRequest> paletteConvs;
  
    RenderTargetLayout target_layout() const noexcept;
-@@ -207,6 +211,8 @@ struct FramePacket {
+   bool has_consumer() const {
+-    return resolveTarget || snapshotColorDst || snapshotDepthDst || snapshotNormalDst || presentConsumer;
++    return resolveTarget || snapshotColorDst || snapshotDepthDst || snapshotNormalDst || presentConsumer ||
++           captureDepthSnapshot || applyPostEffects || applyImageEffects;
+   }
+   bool has_content() const {
+     if (hasDraws || clearDepth) {
+@@ -216,9 +226,11 @@ struct FramePacket {
+   std::vector<present::Request> presents;
+   std::deque<FrameOp> ops;
+   std::deque<TextureUpload> textureUploads;
+-#ifdef AURORA_GFX_DEBUG_GROUPS
++  // Debug markers are always recorded (GXInsertDebugMarker): the native port times groups of
++  // draws by them on the GPU (COS_GPU_GROUPS). Nothing is recorded unless the game inserts one.
+   std::vector<std::string> debugMarkers;
+-#endif
++  // The draw census capture of this frame (census.hpp), if one was requested.
++  std::shared_ptr<census::Capture> census;
+   ByteBuffer verts;
+   ByteBuffer uniforms;
+   ByteBuffer indices;
+@@ -226,6 +238,8 @@ struct FramePacket {
    ByteBuffer textureUpload;
    wgpu::CommandEncoder encoder;
    std::vector<AfterSubmitCallback> afterSubmitCallbacks;
@@ -123,33 +551,608 @@ index e36891e..6d03965 100644
    uint32_t frameIndex = 0;
    size_t stagingBuffer = 0;
 diff --git a/lib/gfx/pipeline_cache.cpp b/lib/gfx/pipeline_cache.cpp
-index 5081608..6458c9b 100644
+index 46a9903c3013cb42b74558c728260bbf3467550e..2671d57b64f84e80af28b6485855d218814c4fbd 100644
 --- a/lib/gfx/pipeline_cache.cpp
 +++ b/lib/gfx/pipeline_cache.cpp
-@@ -1,4 +1,5 @@
+@@ -1,10 +1,13 @@
  #include "pipeline_cache.hpp"
 +#include "pipeline_policy.hpp"
  
  #include "clear.hpp"
  #include "frame_packet.hpp"
-@@ -1286,7 +1287,11 @@ PipelineRef find_pipeline(const clear::PipelineConfig& config, const RenderTarge
+ #include "resources.hpp"
+ #include "hash.hpp"
+ #include "../gx/pipeline.hpp"
++#include "../gx/shader_info.hpp"
++#include <aurora/pipeline_cache_save.h>
+ #include "../io.hpp"
+ #ifdef AURORA_ENABLE_RMLUI
+ #include "../rmlui/pipeline.hpp"
+@@ -86,6 +89,12 @@ static std::condition_variable g_pipelineQueueCv;
+ static std::condition_variable g_pipelineReadyCv;
+ static absl::flat_hash_map<PipelineRef, CompiledPipeline> g_pipelines;
+ static absl::flat_hash_map<HashType, KnownPipeline> g_knownPipelines;
++// Pipelines first seen this run and not built yet (cache key -> first frame used): each is written
++// to the cache file only once its build returns (persist_built_pipeline), so a pipeline whose build
++// crashes the process never reaches the file, where every later start's warm-up would build it
++// again and crash before the game starts. Locked after g_pipelineMutex when both are held.
++static std::mutex g_unsavedPipelinesMutex;
++static absl::flat_hash_map<HashType, uint32_t> g_unsavedPipelines;
+ static std::optional<uint64_t> g_pipelineLayoutKey;
+ static std::deque<PendingPipeline> g_pipelineQueue;
+ static std::deque<PendingPipeline> g_backgroundPipelineQueue;
+@@ -435,8 +444,11 @@ static void notify_pipeline_ready(bool queued, uint32_t pipelineCount) {
+   g_pipelineReadyCv.notify_all();
+ }
  
- PipelineRef find_pipeline(const gx::PipelineConfig& config, const RenderTargetLayout& layout) {
-   remember_pipeline_config(ShaderType::GX, config, current_frame(), true, true);
--  return resolve_pipeline(ShaderType::GX, config, layout, draw_pipeline_priority());
++// persist: write a new or earlier-used pipeline to the cache file; with saveWhenBuilt (GX pipelines,
++// whose shaders the GX generator builds) a new one waits for its build (g_unsavedPipelines).
+ template <typename Config>
+-static void remember_pipeline_config(ShaderType type, const Config& config, uint32_t firstFrameUsed, bool persist) {
++static void remember_pipeline_config(ShaderType type, const Config& config, uint32_t firstFrameUsed, bool persist,
++                                     bool saveWhenBuilt = false) {
+   const auto cacheKey = xxh3_hash(config, static_cast<HashType>(type));
+   bool changed = false;
+   {
+@@ -444,12 +456,40 @@ static void remember_pipeline_config(ShaderType type, const Config& config, uint
+     auto [it, inserted] = g_knownPipelines.try_emplace(cacheKey, KnownPipeline{type, config, firstFrameUsed});
+     changed = inserted || firstFrameUsed < it->second.firstFrameUsed;
+     it->second.firstFrameUsed = std::min(it->second.firstFrameUsed, firstFrameUsed);
++    if (persist && changed && saveWhenBuilt) {
++      std::lock_guard unsavedLock{g_unsavedPipelinesMutex};
++      if (inserted) {
++        g_unsavedPipelines.emplace(cacheKey, firstFrameUsed);
++        return;
++      }
++      if (auto unsaved = g_unsavedPipelines.find(cacheKey); unsaved != g_unsavedPipelines.end()) {
++        unsaved->second = std::min(unsaved->second, firstFrameUsed);
++        return;
++      }
++    }
+   }
+   if (persist && changed) {
+     enqueue_pipeline_cache_write(make_pipeline_cache_write(type, cacheKey, config, firstFrameUsed));
+   }
+ }
+ 
++// Writes a pipeline first seen this run once its build has returned (g_unsavedPipelines).
++template <typename Config>
++static void persist_built_pipeline(ShaderType type, const Config& config) {
++  const auto cacheKey = xxh3_hash(config, static_cast<HashType>(type));
++  uint32_t firstFrameUsed = 0;
++  {
++    std::lock_guard lock{g_unsavedPipelinesMutex};
++    auto it = g_unsavedPipelines.find(cacheKey);
++    if (it == g_unsavedPipelines.end()) {
++      return;
++    }
++    firstFrameUsed = it->second;
++    g_unsavedPipelines.erase(it);
++  }
++  enqueue_pipeline_cache_write(make_pipeline_cache_write(type, cacheKey, config, firstFrameUsed));
++}
++
+ static PipelineRef find_pipeline_impl(PipelineRef runtimeKey, NewPipelineCallback&& cb,
+                                       PipelinePriority priority = PipelinePriority::Normal) {
+   ZoneScoped;
+@@ -528,7 +568,14 @@ static PipelineRef find_pipeline_impl(PipelineRef runtimeKey, NewPipelineCallbac
+ static PipelineRef resolve_pipeline(ShaderType type, const gx::PipelineConfig& config, const RenderTargetLayout& layout,
+                                     PipelinePriority priority) {
+   const auto runtimeKey = xxh3_hash(layout.key, xxh3_hash(config, static_cast<HashType>(type)));
+-  return find_pipeline_impl(runtimeKey, [config, layout] { return create_pipeline(config, layout); }, priority);
++  return find_pipeline_impl(
++      runtimeKey,
++      [type, config, layout] {
++        auto pipeline = create_pipeline(config, layout);
++        persist_built_pipeline(type, config);
++        return pipeline;
++      },
++      priority);
+ }
+ 
+ static PipelineRef resolve_pipeline(ShaderType type, const clear::PipelineConfig& config,
+@@ -547,8 +594,18 @@ static PipelineRef resolve_pipeline(ShaderType type, const rmlui::PipelineConfig
+ }
+ #endif
+ 
++// Set by pipeline_cache_abort when the statement that failed found the file damaged (a write torn by
++// a killed process, a truncated or overwritten file): the file is then deleted and, while loading,
++// started again from an empty one instead of being left broken for every later run.
++static bool g_pipelineCacheDamaged = false;
++// The result of the last failed write_pipeline_cache_record (for journal_fallback).
++static int g_pipelineCacheWriteError = SQLITE_OK;
++
+ static void pipeline_cache_abort() {
+   g_pipelineCacheBroken = true;
++  if (g_pipelineCacheDb != nullptr && sqlite::is_damaged(sqlite3_errcode(g_pipelineCacheDb))) {
++    g_pipelineCacheDamaged = true;
++  }
+   if (g_pipelineCacheLoadStmt != nullptr) {
+     sqlite3_finalize(g_pipelineCacheLoadStmt);
+     g_pipelineCacheLoadStmt = nullptr;
+@@ -612,15 +669,34 @@ static sqlite3* open_pipeline_cache_seed_db(const std::string& path) {
+   return seedDb;
+ }
+ 
++static int seed_pipeline_cache_once();
++static std::string pipeline_cache_db_path();
++
++// Merges the bundled pipeline cache. A write that fails because of the journal file is tried once
++// more after sqlite::journal_fallback (the Switch: journal_mode=MEMORY).
+ static void seed_pipeline_cache() {
+   if (g_pipelineCacheBroken || g_pipelineCacheDb == nullptr || g_pipelineCacheUpsertStmt == nullptr) {
+     return;
+   }
++  int ret = seed_pipeline_cache_once();
++  if (ret != SQLITE_OK && sqlite::journal_fallback(g_pipelineCacheDb, ret, pipeline_cache_db_path(), Log)) {
++    ret = seed_pipeline_cache_once();
++  }
++  if (ret != SQLITE_OK) {
++    if (sqlite::is_damaged(ret)) {
++      g_pipelineCacheDamaged = true; // the rollback cleared the connection's error
++    }
++    pipeline_cache_abort();
++  }
++}
++
++// Returns SQLITE_OK, also when there is nothing to merge, or the failed write's result.
++static int seed_pipeline_cache_once() {
+ 
+   const auto seedPath = pipeline_cache_seed_path();
+   sqlite3* seedDb = open_pipeline_cache_seed_db(seedPath);
+   if (seedDb == nullptr) {
+-    return;
++    return SQLITE_OK;
+   }
+ 
+   sqlite3_stmt* seedStmt = nullptr;
+@@ -639,7 +715,7 @@ static void seed_pipeline_cache() {
+   if (ret != SQLITE_OK) {
+     Log.warn("Failed to read bundled pipeline cache rows from '{}': {}", seedPath, sqlite3_errmsg(seedDb));
+     closeSeed();
+-    return;
++    return SQLITE_OK;
+   }
+ 
+   bool writeFailed = false;
+@@ -650,9 +726,9 @@ static void seed_pipeline_cache() {
+     sqlite::Transaction tx(g_pipelineCacheDb, Log, true);
+     if (!tx) {
+       Log.error("Failed to begin pipeline cache seed transaction");
++      const int beginError = sqlite3_errcode(g_pipelineCacheDb);
+       closeSeed();
+-      pipeline_cache_abort();
+-      return;
++      return beginError != SQLITE_OK ? beginError : SQLITE_ERROR;
+     }
+ 
+     while ((ret = sqlite3_step(seedStmt)) == SQLITE_ROW) {
+@@ -695,55 +771,123 @@ static void seed_pipeline_cache() {
+     }
+ 
+     if (!writeFailed && !readFailed) {
+-      tx.commit();
++      if (const int commitRet = tx.commit(); commitRet != SQLITE_OK) {
++        g_pipelineCacheWriteError = commitRet;
++        writeFailed = true;
++      }
+     }
+   }
+ 
+   closeSeed();
+ 
+   if (writeFailed) {
+-    pipeline_cache_abort();
+-    return;
++    return g_pipelineCacheWriteError != SQLITE_OK ? g_pipelineCacheWriteError : SQLITE_ERROR;
+   }
+ 
+   if (!readFailed) {
+     Log.info("Seeded pipeline cache from '{}' ({} rows merged, {} rows skipped)", seedPath, mergedRows, skippedRows);
+   }
++  return SQLITE_OK;
++}
++
++static std::string pipeline_cache_db_path() {
++  return io::fs_path_to_string(io::fs_path_from_string(g_config.cachePath) / "pipeline_cache.db");
++}
++
++// Why the last open failed (the first failing step and its result), for one summary line in
++// prepare_pipeline_cache_db instead of a line per step.
++static int g_pipelineCacheOpenError = SQLITE_OK;
++static std::string g_pipelineCacheOpenMessage;
++
++template <typename... T>
++static void open_error(fmt::format_string<T...> fmt, T&&... args) {
++  if (g_pipelineCacheOpenError != SQLITE_OK) {
++    return;
++  }
++  g_pipelineCacheOpenError = g_pipelineCacheDb != nullptr ? sqlite3_errcode(g_pipelineCacheDb) : SQLITE_CANTOPEN;
++  if (g_pipelineCacheOpenError == SQLITE_OK) {
++    g_pipelineCacheOpenError = SQLITE_ERROR;
++  }
++  g_pipelineCacheOpenMessage = fmt::format(fmt, std::forward<T>(args)...);
+ }
+ 
++static bool prepare_pipeline_cache_db_once();
++
++// Opens the cache; one that cannot be opened because the file is damaged is removed and started
++// once more from an empty file (then seeded again from the bundled cache).
+ static bool prepare_pipeline_cache_db() {
++  static bool s_retried = false;
+   if (g_pipelineCacheBroken) {
+     return false;
+   }
+   if (g_pipelineCacheDb != nullptr) {
+     return true;
+   }
++  g_pipelineCacheOpenError = SQLITE_OK;
++  if (prepare_pipeline_cache_db_once()) {
++    return true;
++  }
++  if (g_pipelineCacheOpenError == SQLITE_OK) {
++    return false; // failed after opening (seeding), already reported
++  }
++  const auto path = pipeline_cache_db_path();
++  const std::string why = g_pipelineCacheOpenMessage;
++  if (s_retried || !sqlite::reset_on_open_failure(g_pipelineCacheOpenError)) {
++    Log.error("Pipeline cache {} could not be opened ({}); running without it", path, why);
++    return false;
++  }
++  s_retried = true;
++  const long long oldSize = sqlite::reset_cache_file(path);
++  g_pipelineCacheBroken = false;
++  g_pipelineCacheDamaged = false;
++  g_pipelineCacheOpenError = SQLITE_OK;
++  if (!prepare_pipeline_cache_db_once()) {
++    Log.error("Pipeline cache {} could not be opened ({}); deleted it ({} bytes) but a new one failed too ({}); "
++              "running without it",
++              path, why, oldSize, g_pipelineCacheOpenMessage);
++    return false;
++  }
++  Log.warn("Pipeline cache {} could not be opened ({}); deleted it ({} bytes) and started an empty one", path, why,
++           oldSize);
++  return true;
++}
+ 
+-  const auto path = io::fs_path_to_string(io::fs_path_from_string(g_config.cachePath) / "pipeline_cache.db");
+-  auto ret = sqlite3_open(path.c_str(), &g_pipelineCacheDb);
+-  if (ret != SQLITE_OK) {
+-    Log.error("Failed to open pipeline cache database: {}", sqlite3_errmsg(g_pipelineCacheDb));
++static bool prepare_pipeline_cache_db_once() {
++  if (g_pipelineCacheBroken) {
++    return false;
++  }
++  if (g_pipelineCacheDb != nullptr) {
++    return true;
++  }
++  const auto fail = [] {
++    open_error("failed");
+     pipeline_cache_abort();
+     return false;
++  };
++
++  const auto path = pipeline_cache_db_path();
++  auto ret = sqlite3_open(path.c_str(), &g_pipelineCacheDb);
++  if (ret != SQLITE_OK) {
++    open_error("Failed to open pipeline cache database: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    return fail();
+   }
+ 
+-  ret = sqlite::exec(g_pipelineCacheDb, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
++  ret = sqlite::apply_cache_pragmas(g_pipelineCacheDb, path, Log);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to set pipeline cache pragmas: {}", sqlite3_errmsg(g_pipelineCacheDb));
+-    pipeline_cache_abort();
+-    return false;
++    open_error("Failed to set pipeline cache pragmas: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    return fail();
+   }
+ 
+   bool schemaFailed = false;
+   {
+     sqlite::Transaction tx(g_pipelineCacheDb, Log, true);
+     if (!tx) {
+-      Log.error("Failed to begin pipeline cache schema transaction");
++      open_error("Failed to begin pipeline cache schema transaction");
+       schemaFailed = true;
+     } else {
+       ret = sqlite::exec(g_pipelineCacheDb, "CREATE TABLE IF NOT EXISTS aurora_schema(value INTEGER);");
+       if (ret != SQLITE_OK) {
+-        Log.error("Failed to create pipeline cache schema table: {}", sqlite3_errmsg(g_pipelineCacheDb));
++        open_error("Failed to create pipeline cache schema table: {}", sqlite3_errmsg(g_pipelineCacheDb));
+         schemaFailed = true;
+       }
+     }
+@@ -754,7 +898,7 @@ static bool prepare_pipeline_cache_db() {
+       ret = sqlite::exec(g_pipelineCacheDb, schemaQuery.c_str(),
+                          [&schemaMatch](int, char**, char**) { schemaMatch = true; });
+       if (ret != SQLITE_OK) {
+-        Log.error("Failed to read pipeline cache schema version: {}", sqlite3_errmsg(g_pipelineCacheDb));
++        open_error("Failed to read pipeline cache schema version: {}", sqlite3_errmsg(g_pipelineCacheDb));
+         schemaFailed = true;
+       }
+     }
+@@ -778,7 +922,7 @@ INSERT INTO aurora_schema VALUES ({});)",
+           PipelineCacheSchema);
+       ret = sqlite::exec(g_pipelineCacheDb, schemaSql.c_str());
+       if (ret != SQLITE_OK) {
+-        Log.error("Failed to initialize pipeline cache schema: {}", sqlite3_errmsg(g_pipelineCacheDb));
++        open_error("Failed to initialize pipeline cache schema: {}", sqlite3_errmsg(g_pipelineCacheDb));
+         schemaFailed = true;
+       }
+     }
+@@ -789,8 +933,7 @@ INSERT INTO aurora_schema VALUES ({});)",
+   }
+ 
+   if (schemaFailed) {
+-    pipeline_cache_abort();
+-    return false;
++    return fail();
+   }
+ 
+   ret = sqlite3_prepare_v3(g_pipelineCacheDb,
+@@ -799,9 +942,8 @@ INSERT INTO aurora_schema VALUES ({});)",
+                            "ORDER BY first_frame_used ASC, rowid ASC",
+                            -1, SQLITE_PREPARE_PERSISTENT, &g_pipelineCacheLoadStmt, nullptr);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prepare pipeline cache load statement: {}", sqlite3_errmsg(g_pipelineCacheDb));
+-    pipeline_cache_abort();
+-    return false;
++    open_error("Failed to prepare pipeline cache load statement: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    return fail();
+   }
+ 
+   ret = sqlite3_prepare_v3(
+@@ -815,9 +957,8 @@ INSERT INTO aurora_schema VALUES ({});)",
+       "first_frame_used = MIN(pipeline_cache.first_frame_used, excluded.first_frame_used)",
+       -1, SQLITE_PREPARE_PERSISTENT, &g_pipelineCacheUpsertStmt, nullptr);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prepare pipeline cache upsert statement: {}", sqlite3_errmsg(g_pipelineCacheDb));
+-    pipeline_cache_abort();
+-    return false;
++    open_error("Failed to prepare pipeline cache upsert statement: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    return fail();
+   }
+ 
+   seed_pipeline_cache();
+@@ -837,7 +978,9 @@ static void prune_old_pipeline_cache_versions() {
+                                        underlying(ShaderType::Clear), clear::ClearPipelineConfigVersion);
+   auto ret = sqlite::exec(g_pipelineCacheDb, clearDelete.c_str());
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prune clear pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    if (!sqlite::is_damaged(ret)) { // a damaged file gets one line where it is deleted
++      Log.error("Failed to prune clear pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    }
+     pipeline_cache_abort();
+     return;
+   }
+@@ -846,7 +989,9 @@ static void prune_old_pipeline_cache_versions() {
+                                     underlying(ShaderType::GX), gx::GXPipelineConfigVersion);
+   ret = sqlite::exec(g_pipelineCacheDb, gxDelete.c_str());
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prune GX pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    if (!sqlite::is_damaged(ret)) { // a damaged file gets one line where it is deleted
++      Log.error("Failed to prune GX pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    }
+     pipeline_cache_abort();
+     return;
+   }
+@@ -856,7 +1001,9 @@ static void prune_old_pipeline_cache_versions() {
+                                      underlying(ShaderType::Rml), rmlui::RmlPipelineConfigVersion);
+   ret = sqlite::exec(g_pipelineCacheDb, rmlDelete.c_str());
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prune RmlUi pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    if (!sqlite::is_damaged(ret)) { // a damaged file gets one line where it is deleted
++      Log.error("Failed to prune RmlUi pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    }
+     pipeline_cache_abort();
+   }
+ #endif
+@@ -864,6 +1011,7 @@ static void prune_old_pipeline_cache_versions() {
+ 
+ static bool write_pipeline_cache_record(const PipelineCacheWrite& write) {
+   const auto fail = [&]() {
++    g_pipelineCacheWriteError = sqlite3_errcode(g_pipelineCacheDb);
+     sqlite3_reset(g_pipelineCacheUpsertStmt);
+     sqlite3_clear_bindings(g_pipelineCacheUpsertStmt);
+     return false;
+@@ -902,7 +1050,9 @@ static bool write_pipeline_cache_record(const PipelineCacheWrite& write) {
+ 
+   ret = sqlite3_step(g_pipelineCacheUpsertStmt);
+   if (ret != SQLITE_DONE) {
+-    Log.error("Failed to upsert pipeline cache row: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    if (!sqlite::is_damaged(ret)) { // a damaged file gets one line where it is deleted
++      Log.error("Failed to upsert pipeline cache row: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    }
+     return fail();
+   }
+ 
+@@ -928,28 +1078,41 @@ static void pipeline_cache_writer() {
+       batch.swap(g_pipelineCacheWriteQueue);
+     }
+ 
+-    bool writeFailed = false;
+-    {
++    // SQLITE_OK or the failed write's result.
++    const auto writeBatch = [&batch]() -> int {
+       sqlite::Transaction tx(g_pipelineCacheDb, Log, true);
+       if (!tx) {
+         Log.error("Failed to begin pipeline cache write transaction");
+-        writeFailed = true;
+-      } else {
+-        for (const auto& write : batch) {
+-          if (!write_pipeline_cache_record(write)) {
+-            writeFailed = true;
+-            break;
+-          }
+-        }
+-
+-        if (!writeFailed) {
+-          tx.commit();
++        const int ret = sqlite3_errcode(g_pipelineCacheDb);
++        return ret != SQLITE_OK ? ret : SQLITE_ERROR;
++      }
++      for (const auto& write : batch) {
++        if (!write_pipeline_cache_record(write)) {
++          return g_pipelineCacheWriteError != SQLITE_OK ? g_pipelineCacheWriteError : SQLITE_ERROR;
+         }
+       }
++      return tx.commit();
++    };
++    int writeRet = writeBatch();
++    if (writeRet != SQLITE_OK &&
++        sqlite::journal_fallback(g_pipelineCacheDb, writeRet, pipeline_cache_db_path(), Log)) {
++      writeRet = writeBatch();
++    }
++    const bool writeFailed = writeRet != SQLITE_OK;
++    if (sqlite::is_damaged(writeRet)) {
++      g_pipelineCacheDamaged = true; // the rollback cleared the connection's error
+     }
+ 
+     if (writeFailed) {
+       pipeline_cache_abort();
++      if (g_pipelineCacheDamaged) {
++        // Not reopened here (the other threads only check the pointer): the next run starts an
++        // empty cache, seeded from the bundled one.
++        const auto path = pipeline_cache_db_path();
++        const long long oldSize = sqlite::reset_cache_file(path);
++        Log.warn("Pipeline cache {} is damaged; deleted it ({} bytes), no pipeline cache writes this run", path,
++                 oldSize);
++      }
+       return;
+     }
+   }
+@@ -1029,14 +1192,21 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
+     if (config.version != configVersion) {
+       continue;
+     }
++    if constexpr (std::is_same_v<PipelineConfig, gx::PipelineConfig>) {
++      // rows written before stages were resolved (a frozen Mothula's crashed every warm-up)
++      gx::resolve_ungenerated_texcoords(config.shaderConfig);
++    }
+ 
+     remember_pipeline_config(type, config, firstFrameUsed, false);
+     ++acceptedRows;
+   }
+ 
+   if (ret != SQLITE_DONE) {
+-    Log.error("Failed to read pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
+-    pipeline_cache_abort();
++    if (!sqlite::is_damaged(ret)) { // a damaged file gets one line where it is deleted
++      Log.error("Failed to read pipeline cache rows: {}", sqlite3_errmsg(g_pipelineCacheDb));
++    }
++    pipeline_cache_abort(); // finalizes the load statement: sqlite3_clear_bindings(nullptr) would crash
++    return acceptedRows;
+   }
+ 
+   sqlite3_reset(g_pipelineCacheLoadStmt);
+@@ -1044,7 +1214,25 @@ static size_t load_pipeline_cache_entries(ShaderType type, uint32_t configVersio
+   return acceptedRows;
+ }
+ 
++static size_t load_pipeline_cache_once();
++
++// Loads the known pipelines. A file found damaged while reading is deleted and the cache started
++// again from an empty file (seeded from the bundled cache), once.
+ static size_t load_pipeline_cache() {
++  g_pipelineCacheDamaged = false;
++  size_t acceptedRows = load_pipeline_cache_once();
++  if (g_pipelineCacheBroken && g_pipelineCacheDamaged) {
++    const auto path = pipeline_cache_db_path();
++    const long long oldSize = sqlite::reset_cache_file(path);
++    Log.warn("Pipeline cache {} is damaged; deleted it ({} bytes) and started an empty one", path, oldSize);
++    g_pipelineCacheBroken = false;
++    g_pipelineCacheDamaged = false;
++    acceptedRows += load_pipeline_cache_once();
++  }
++  return acceptedRows;
++}
++
++static size_t load_pipeline_cache_once() {
+   if (!prepare_pipeline_cache_db()) {
+     return 0;
+   }
+@@ -1087,16 +1275,23 @@ static void stop_pipeline_cache_writer() {
+   g_pipelineCacheWriteQueue.clear();
+ }
+ 
++// AuroraConfig::blockingPipelines: wait for a draw's pipeline instead of skipping the draw.
++static PipelinePriority draw_pipeline_priority(bool blocking) {
++  return (blocking || g_config.blockingPipelines) ? PipelinePriority::Blocking : PipelinePriority::Normal;
++}
++
+ PipelineRef find_pipeline(const clear::PipelineConfig& config, const RenderTargetLayout& layout, bool blocking) {
+   remember_pipeline_config(ShaderType::Clear, config, current_frame(), true);
+-  return resolve_pipeline(ShaderType::Clear, config, layout,
+-                          blocking ? PipelinePriority::Blocking : PipelinePriority::Normal);
++  return resolve_pipeline(ShaderType::Clear, config, layout, draw_pipeline_priority(blocking));
+ }
+ 
+ PipelineRef find_pipeline(const gx::PipelineConfig& config, const RenderTargetLayout& layout, bool blocking) {
+-  remember_pipeline_config(ShaderType::GX, config, current_frame(), true);
+-  return resolve_pipeline(ShaderType::GX, config, layout,
+-                          blocking ? PipelinePriority::Blocking : PipelinePriority::Normal);
++  remember_pipeline_config(ShaderType::GX, config, current_frame(), true, true);
 +  // Actor-ID/alpha-clear passes are consumed by CPU readback in the same
 +  // frame. Skipping a cold pipeline can turn scene alpha into a false subject.
-+  const auto priority = must_wait_for_gx_pipeline(g_config.blockingPipelines, config.colorUpdate, config.alphaUpdate)
++  const auto priority = must_wait_for_gx_pipeline(blocking || g_config.blockingPipelines, config.colorUpdate, config.alphaUpdate)
 +      ? PipelinePriority::Blocking : PipelinePriority::Normal;
 +  return resolve_pipeline(ShaderType::GX, config, layout, priority);
  }
  
  #ifdef AURORA_ENABLE_RMLUI
+@@ -1160,6 +1355,31 @@ void initialize_pipeline_cache() {
+   }
+ }
+ 
++// The pipelines still waiting for their build (g_unsavedPipelines), queued for the cache file as a
++// draw's request queued them before patch 0023: for a clean exit, where none of them crashed.
++static void enqueue_unbuilt_pipeline_writes() {
++  std::scoped_lock lock{g_pipelineMutex, g_unsavedPipelinesMutex};
++  for (const auto& [cacheKey, firstFrameUsed] : g_unsavedPipelines) {
++    const auto known = g_knownPipelines.find(cacheKey);
++    if (known != g_knownPipelines.end()) {
++      std::visit(
++          [&](const auto& config) {
++            enqueue_pipeline_cache_write(make_pipeline_cache_write(known->second.type, cacheKey, config, firstFrameUsed));
++          },
++          known->second.config);
++    }
++  }
++  g_unsavedPipelines.clear();
++}
++
++void save_unbuilt_pipelines() {
++  enqueue_unbuilt_pipeline_writes();
++  stop_pipeline_cache_writer(); // drains the queue; later writes wait for a writer that never comes
++}
++
++// C linkage: the same function as include/aurora/pipeline_cache_save.h's global declaration
++extern "C" void aurora_save_unbuilt_pipelines(void) { save_unbuilt_pipelines(); }
++
+ void shutdown_pipeline_cache() {
+   if (g_hasPipelineThread) {
+     g_pipelineThreadEnd = true;
+@@ -1169,6 +1389,8 @@ void shutdown_pipeline_cache() {
+   }
+   g_hasPipelineThread = false;
+ 
++  // A clean shutdown: the pipelines still waiting for their build crashed nothing
++  enqueue_unbuilt_pipeline_writes();
+   stop_pipeline_cache_writer();
+   pipeline_cache_abort();
+   g_pipelineCacheBroken = false;
 diff --git a/lib/gfx/recording.cpp b/lib/gfx/recording.cpp
-index 70191dd..b24c183 100644
+index 61bf1c1893eec9f8e0c1b9ae17e2b9458924aa7b..ec8ecd584a2e57b148762f2932808baa811ca5a5 100644
 --- a/lib/gfx/recording.cpp
 +++ b/lib/gfx/recording.cpp
-@@ -54,6 +54,8 @@ struct FrameRecorder {
+@@ -1,3 +1,4 @@
++#include "depth_peek.hpp"
+ #include "recording.hpp"
+ 
+ #include "encoding.hpp"
+@@ -55,6 +56,8 @@ struct FrameRecorder {
    ClipRect cachedScissor;
    bool suppressRenderWorker = false;
    bool normalRequested = false;
@@ -158,7 +1161,19 @@ index 70191dd..b24c183 100644
  #ifdef AURORA_GFX_DEBUG_GROUPS
    std::vector<std::string> debugGroupStack;
  #endif
-@@ -274,6 +276,7 @@ void seal_pass(FramePacket& frame, uint32_t passIndex) {
+@@ -70,6 +73,11 @@ struct FrameRecorder {
+ };
+ 
+ FrameRecorder g_recorder;
++// native/patches/aurora/0009: the EFB content scale, and the smallest one this frame used (the
++// depth snapshot at the frame's end reads the EFB part the 3D drawing used).
++float g_contentScale = 1.f;
++float g_frameContentScale = 1.f;
++
+ 
+ std::string pass_label(std::string_view kind) {
+ #ifdef AURORA_GFX_DEBUG_GROUPS
+@@ -281,6 +289,7 @@ void seal_pass(FramePacket& frame, uint32_t passIndex) {
    if (pass.sealed) {
      return;
    }
@@ -166,16 +1181,69 @@ index 70191dd..b24c183 100644
    pass.sealed = true;
  }
  
-@@ -567,6 +570,8 @@ void enqueue_pass(FramePacket& frame, uint32_t passIndex) {
- namespace detail {
+@@ -636,6 +645,8 @@ void prepare_recording() {
+ }
  
  void begin_recording(FramePacket& packet, size_t frameSlot) {
 +  g_recorder.postEffectsTaken = false;
 +  g_recorder.postEffects = {};
    CHECK(!g_recorder.active(), "A recording session is already active");
-   if (g_recorder.normalRequested && webgpu::enable_normal_buffer()) {
-     g_recorder.normalRequested = false;
-@@ -1110,6 +1115,43 @@ bool resolve_pass(const ResolveDesc& desc, ResolvedTargets& out) {
+   if (!packet.efb.layout.colorAttachmentCount) {
+     prepare_recording();
+@@ -643,6 +654,8 @@ void begin_recording(FramePacket& packet, size_t frameSlot) {
+   }
+   g_recorder.packet = &packet;
+   g_recorder.frameSlot = frameSlot;
++  g_frameContentScale = g_contentScale;
++  packet.census = census::begin_frame(packet.frameIndex);
+   g_passSnapshotPools[frameSlot].used = 0;
+   g_presentPools[frameSlot].used = 0;
+   g_recorder.drawCallCount = 0;
+@@ -703,6 +716,7 @@ RecordedFrame end_recording() {
+     g_recorder.debugGroupStack.clear();
+   }
+ #endif
++  census::end_frame();
+   const RecordedFrame recorded{.packet = g_recorder.packet, .frameSlot = g_recorder.frameSlot};
+   g_recorder.packet = nullptr;
+   g_recorder.frameSlot = 0;
+@@ -774,6 +788,12 @@ void increment_merged_draw_count() noexcept {
+   }
+ }
+ 
++void add_merged_draw_count(uint32_t count) noexcept {
++  if (g_recorder.active()) {
++    g_recorder.mergedDrawCallCount += count;
++  }
++}
++
+ } // namespace detail
+ 
+ void queue_texture_upload(TextureUpload upload) {
+@@ -908,6 +928,22 @@ gx::DrawData* get_last_draw_command() {
+   return &inline_payload<gx::DrawData>(last.data.draw.payload.data());
+ }
+ 
++void set_content_scale(float scale) noexcept {
++  g_contentScale = std::clamp(scale, 0.25f, 1.f);
++  g_frameContentScale = std::min(g_frameContentScale, g_contentScale);
++}
++
++float content_scale() noexcept { return g_contentScale; }
++
++Vec2<uint32_t> get_mapping_target_size() noexcept {
++  auto size = get_render_target_size();
++  if (g_contentScale < 1.f && !g_recorder.inOffscreen) {
++    size.x = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(static_cast<float>(size.x) * g_contentScale)));
++    size.y = std::max<uint32_t>(1, static_cast<uint32_t>(std::lround(static_cast<float>(size.y) * g_contentScale)));
++  }
++  return size;
++}
++
+ Vec2<uint32_t> get_render_target_size() noexcept {
+   if (g_recorder.currentRenderPass < current_render_passes().size()) {
+     const auto& size =
+@@ -1323,6 +1359,43 @@ bool push_readback_op(std::shared_ptr<readback::Job> job, bool efbSource) {
    return true;
  }
  
@@ -213,13 +1281,13 @@ index 70191dd..b24c183 100644
 +  if (scene.hasDepth) scene.depthStoreOp = wgpu::StoreOp::Store;
 +  if (scene.hasStencil) scene.stencilStoreOp = wgpu::StoreOp::Store;
 +  enqueue_pass(frame, g_recorder.currentRenderPass);
-+  resume_efb_pass_loading(scene);
++  resume_pass_loading(scene);
 +}
 +
  bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSize) {
    if (type == InvalidEncoderTask) {
      Log.warn("push_encoder_task: invalid encoder task type");
-@@ -1164,6 +1206,16 @@ bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSi
+@@ -1377,6 +1450,16 @@ bool push_encoder_task(EncoderTaskId type, const void* payload, size_t payloadSi
  template <>
  void push_draw_command(gx::DrawData data) {
    push_draw_command(make_draw_command<gx::render>(data));
@@ -236,7 +1304,88 @@ index 70191dd..b24c183 100644
  }
  
  #ifdef AURORA_ENABLE_RMLUI
-@@ -1329,3 +1381,11 @@ void pop_debug_group() {
+@@ -1407,6 +1490,9 @@ void finish() {
+   if (g_recorder.currentRenderPass != UINT32_MAX) {
+     auto& frame = current_frame_packet();
+     frame.uniforms.append_zeroes(gx::MaxUniformSize);
++    auto& pass = frame.renderPasses[g_recorder.currentRenderPass];
++    pass.captureDepthSnapshot = true;
++    pass.depthSnapshotScale = g_frameContentScale;
+     enqueue_pass(frame, g_recorder.currentRenderPass);
+     g_recorder.currentRenderPass = UINT32_MAX;
+   }
+@@ -1428,6 +1514,26 @@ Range push_indices(const uint8_t* data, size_t length, size_t alignment) {
+   return push(current_frame_packet().indices, data, length, alignment);
+ }
+ 
++uint8_t* map_indices(size_t length, size_t alignment, Range& range) {
++  if (!check_recording("map_indices")) {
++    range = {};
++    return nullptr;
++  }
++  auto& indices = current_frame_packet().indices;
++  range = map(indices, length, alignment);
++  return indices.data() + range.offset;
++}
++
++uint8_t* map_verts(size_t length, size_t alignment, Range& range) {
++  if (!check_recording("map_verts")) {
++    range = {};
++    return nullptr;
++  }
++  auto& verts = current_frame_packet().verts;
++  range = map(verts, length, alignment);
++  return verts.data() + range.offset;
++}
++
+ Range push_uniform(const uint8_t* data, size_t length) {
+   ZoneScoped;
+   if (!check_recording("push_uniform")) {
+@@ -1462,14 +1568,41 @@ uint32_t align_uniform(uint32_t value) {
+ }
+ 
+ void insert_debug_marker(std::string label) {
+-#if defined(AURORA_GFX_DEBUG_GROUPS)
++  // Always recorded (native/patches/aurora/0008): the native port's GPU timer groups draws by
++  // these markers on the Switch, and the draw census tags each draw with the last one.
++  if (!g_recorder.active() || g_recorder.currentRenderPass == UINT32_MAX) {
++    return;
++  }
++  if (auto* capture = census::recording()) {
++    capture->currentMarker = static_cast<int32_t>(capture->markers.size());
++    capture->markers.push_back(label);
++  }
+   auto& markers = current_frame_packet().debugMarkers;
+   const auto idx = markers.size();
+   markers.emplace_back(std::move(label));
+   push_command(CommandType::DebugMarker, {.debugMarkerIndex = idx});
+-#endif
+ }
+ 
++void set_last_command_census(uint32_t index) noexcept {
++  if (g_recorder.currentRenderPass >= current_render_passes().size()) {
++    return;
++  }
++  auto& commands = current_render_passes()[g_recorder.currentRenderPass].commands;
++  if (!commands.empty()) {
++    commands.back().censusIndex = index;
++  }
++}
++
++uint32_t last_command_census() noexcept {
++  if (g_recorder.currentRenderPass >= current_render_passes().size()) {
++    return UINT32_MAX;
++  }
++  const auto& commands = current_render_passes()[g_recorder.currentRenderPass].commands;
++  return commands.empty() ? UINT32_MAX : commands.back().censusIndex;
++}
++
++uint32_t current_pass_index() noexcept { return g_recorder.currentRenderPass; }
++
+ void push_debug_group(std::string label) {
+ #if defined(AURORA_GFX_DEBUG_GROUPS)
+   g_recorder.debugGroupStack.push_back(std::move(label));
+@@ -1492,3 +1625,11 @@ void pop_debug_group() {
    aurora::gfx::g_recorder.debugGroupStack.pop_back();
  #endif
  }
@@ -249,7 +1398,7 @@ index 70191dd..b24c183 100644
 +  aurora::gfx::finish_world_effects({x, y, width, height}, true);
 +}
 diff --git a/lib/gfx/render_worker.cpp b/lib/gfx/render_worker.cpp
-index 85783b6..6257710 100644
+index 85783b60ec1a569ac7fba6dd153e8bc588cffee5..6257710b7cfcd06d9700f1495d0faf54d6819f4d 100644
 --- a/lib/gfx/render_worker.cpp
 +++ b/lib/gfx/render_worker.cpp
 @@ -17,7 +17,8 @@ BoundedQueue g_queue{QueueCapacity};
@@ -290,7 +1439,7 @@ index 85783b6..6257710 100644
  bool is_idle() noexcept { return g_pendingItems.load(std::memory_order_acquire) == 0; }
  
 diff --git a/lib/gfx/texture.cpp b/lib/gfx/texture.cpp
-index 029a3d0..9ac300a 100644
+index f90454e1313bfe0bab56eee55e56f4f9af843f79..04f593e2a75f6b752430fe2aeec4c20b1f9d0988 100644
 --- a/lib/gfx/texture.cpp
 +++ b/lib/gfx/texture.cpp
 @@ -201,7 +201,11 @@ TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat,
@@ -319,10 +1468,60 @@ index 029a3d0..9ac300a 100644
        .size = size,
        .format = wgpuFormat,
 diff --git a/lib/gx/gx.cpp b/lib/gx/gx.cpp
-index 03294db..92b0ea6 100644
+index 490de4cf9e3dc63f3406869af928734581ec67bb..b1f9d02dc2eb573ce22c230b689e490a1d87008c 100644
 --- a/lib/gx/gx.cpp
 +++ b/lib/gx/gx.cpp
-@@ -613,7 +613,12 @@ void initialize() noexcept {
+@@ -1,6 +1,7 @@
+ #include "gx.hpp"
+ 
+ #include "pipeline.hpp"
++#include "shader_info.hpp"
+ #include "texture.hpp"
+ #include "../dolphin/vi/vi_internal.hpp"
+ #include "../webgpu/gpu.hpp"
+@@ -11,6 +12,7 @@
+ #include "../gfx/resource_cache.hpp"
+ #include "../gfx/texture.hpp"
+ #include "gx_fmt.hpp"
++#include "fifo.hpp"
+ 
+ #include <absl/container/flat_hash_map.h>
+ #include <tracy/Tracy.hpp>
+@@ -225,6 +227,7 @@ void set_viewport_policy(AuroraViewportPolicy policy) noexcept {
+ 
+ void update() noexcept {
+   if (const int pending = sPendingViewportPolicy.exchange(-1, std::memory_order_acq_rel); pending != -1) {
++    fifo::sync(); // the GX FIFO worker reads the policy (async end of frame, patch 0018)
+     const auto policy = static_cast<AuroraViewportPolicy>(pending);
+     g_gxState.viewportPolicy = policy;
+     window::set_frame_buffer_aspect_fit(policy == AURORA_VIEWPORT_FIT);
+@@ -241,7 +244,7 @@ gfx::Viewport map_logical_viewport(const gfx::Viewport& logicalViewport) noexcep
+   }
+ 
+   const auto [logicalFbWidth, logicalFbHeight] = logical_fb_size();
+-  const auto [targetWidth, targetHeight] = gfx::get_render_target_size();
++  const auto [targetWidth, targetHeight] = gfx::get_mapping_target_size();
+   if (logicalFbWidth == 0 || logicalFbHeight == 0 || targetWidth == 0 || targetHeight == 0) {
+     return logicalViewport;
+   }
+@@ -264,7 +267,7 @@ gfx::ClipRect map_logical_scissor(const gfx::ClipRect& logicalScissor) noexcept
+   }
+ 
+   const auto [logicalFbWidth, logicalFbHeight] = logical_fb_size();
+-  const auto [targetWidth, targetHeight] = gfx::get_render_target_size();
++  const auto [targetWidth, targetHeight] = gfx::get_mapping_target_size();
+   if (logicalFbWidth == 0 || logicalFbHeight == 0 || targetWidth == 0 || targetHeight == 0) {
+     return logicalScissor;
+   }
+@@ -456,6 +459,7 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
+   for (u8 i = 0; i < g_gxState.numTexGens; ++i) {
+     config.shaderConfig.tcgs[i] = g_gxState.tcgs[i];
+   }
++  resolve_ungenerated_texcoords(config.shaderConfig);
+   if (g_gxState.alphaCompare) {
+     config.shaderConfig.alphaCompare = g_gxState.alphaCompare;
+   }
+@@ -605,7 +609,12 @@ void initialize() noexcept {
  }
  
  void shutdown() noexcept {
@@ -333,14 +1532,14 @@ index 03294db..92b0ea6 100644
 +  sEmptyTextureView = {};
 +  sEmptyTexture = {};
 +  sEmptySampler = {};
-   sSamplerBindGroupLayout = {};
    sTextureBindGroupLayout = {};
-   {
+   for (auto& item : g_gxState.textures) {
+     item.ref.reset();
 diff --git a/lib/webgpu/gpu.cpp b/lib/webgpu/gpu.cpp
-index b3ae6cd..e518f0b 100644
+index 97f886f15b302567cc943e7cde5b0202f1861d9f..6be481be9a2fb7ce243597e044472c58e4eda849 100644
 --- a/lib/webgpu/gpu.cpp
 +++ b/lib/webgpu/gpu.cpp
-@@ -945,6 +945,13 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
+@@ -896,6 +896,13 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
          }
          requiredFeatures.push_back(feature);
        }
@@ -354,3 +1553,60 @@ index b3ae6cd..e518f0b 100644
  #ifdef TRACY_ENABLE
        if (feature == wgpu::FeatureName::TimestampQuery) {
          requiredFeatures.push_back(feature);
+diff --git a/lib/window.cpp b/lib/window.cpp
+index 63969476bc320ffdcf00b2ff145e4048378a914a..0ace3858e964c701ef18427b3ec52e97ab4a8c2d 100644
+--- a/lib/window.cpp
++++ b/lib/window.cpp
+@@ -55,6 +55,7 @@ SDL_Renderer* g_renderer;
+ #ifndef AURORA_ENABLE_GX
+ float g_frameBufferScale = 0.f;
+ bool g_frameBufferAspectFit = false;
++float g_frameBufferFitAspect = 0.f;
+ #endif
+ SDL_InitFlags g_initializedSubsystems = 0;
+ std::mutex g_eventMutex;
+@@ -591,8 +592,9 @@ AuroraWindowSize refresh_window_size() {
+   if (g_frameBufferAspectFit) {
+     const auto [baseW, baseH] = vi::configured_fb_size();
+     if (baseW > 0 && baseH > 0) {
+-      const auto [fitW, fitH] =
+-          fit_frame_buffer_to_aspect(fb_w, fb_h, static_cast<float>(baseW) / static_cast<float>(baseH));
++      const float aspect = g_frameBufferFitAspect > 0.f ? g_frameBufferFitAspect
++                                                        : static_cast<float>(baseW) / static_cast<float>(baseH);
++      const auto [fitW, fitH] = fit_frame_buffer_to_aspect(fb_w, fb_h, aspect);
+       fb_w = fitW;
+       fb_h = fitH;
+     }
+@@ -814,6 +816,21 @@ void set_frame_buffer_aspect_fit(bool fit) {
+   notify_frame_buffer_change();
+ }
+ 
++void set_frame_buffer_fit_aspect(float aspect) {
++#ifdef AURORA_ENABLE_GX
++  if (!gfx::efb::set_fit_aspect(aspect)) {
++    return;
++  }
++#else
++  aspect = std::isfinite(aspect) ? std::max(0.f, aspect) : 0.f;
++  if (g_frameBufferFitAspect == aspect) {
++    return;
++  }
++  g_frameBufferFitAspect = aspect;
++#endif
++  notify_frame_buffer_change();
++}
++
+ void set_background_input(bool value) { SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, value ? "1" : "0"); }
+ 
+ } // namespace aurora::window
+diff --git a/lib/window.hpp b/lib/window.hpp
+index 099e318ff5d29a7d6999abcd99daf207ec7d1ee9..19c2562f0a1b898f7ab262dc021c6b1f6c43a6f8 100644
+--- a/lib/window.hpp
++++ b/lib/window.hpp
+@@ -69,5 +69,6 @@ void center_window();
+ void notify_frame_buffer_change();
+ void set_frame_buffer_scale(float scale);
+ void set_frame_buffer_aspect_fit(bool fit);
++void set_frame_buffer_fit_aspect(float aspect);
+ void set_background_input(bool value);
+ }; // namespace aurora::window

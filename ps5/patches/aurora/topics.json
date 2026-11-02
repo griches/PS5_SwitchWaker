@@ -3,14 +3,62 @@
     "name": "010-ps5-platform.patch",
     "purpose": "ps5 platform",
     "paths": [
+      "cmake/AuroraDependencyVersions.cmake",
       "lib/aurora.cpp",
       "lib/dawn/BackendBinding.cpp",
       "lib/dolphin/pad/pad.cpp",
+      "lib/dolphin/gx/GXManage.cpp",
+      "lib/dolphin/gx/GXTexture.cpp",
       "lib/imgui.cpp",
-      "lib/card/CardGciFolder.cpp"
+      "lib/card/CardGciFolder.cpp",
+      "lib/input/legacy.cpp"
     ],
-    "base": "SwitchWaker native/cmake/Aurora.cmake plus its native/patches/aurora series",
+    "base": "Pristine Aurora revision from native/cmake/Aurora.cmake",
     "upstreamability": "PS5 integration; assess portable correctness fixes separately",
+    "references": [
+      "MAINTAINING.md"
+    ]
+  },
+  {
+    "name": "020-game-integration.patch",
+    "purpose": "Retained SwitchWaker fixes: FIFO scheduling and fast paths, texture streaming, cache recovery, depth snapshots and camera interpolation",
+    "paths": [
+      "cmake/aurora_gx.cmake",
+      "include/aurora/pipeline_cache_save.h",
+      "include/aurora/texture.hpp",
+      "include/dolphin/gx/GXAurora.h",
+      "include/dolphin/gx/GXCpu2Efb.h",
+      "lib/dolphin/dvd/dvd.cpp",
+      "lib/dolphin/gx/GXAurora.cpp",
+      "lib/dolphin/gx/GXCpu2Efb.cpp",
+      "lib/dolphin/gx/GXFrameBuffer.cpp",
+      "lib/dolphin/gx/GXLighting.cpp",
+      "lib/dolphin/os/OSTime.cpp",
+      "lib/gfx/census.cpp",
+      "lib/gfx/census.hpp",
+      "lib/gfx/depth_peek.cpp",
+      "lib/gfx/depth_peek.hpp",
+      "lib/gfx/pipeline_cache.hpp",
+      "lib/gfx/recording.hpp",
+      "lib/gfx/texture_replacement.cpp",
+      "lib/gx/command_processor.cpp",
+      "lib/gx/command_processor.hpp",
+      "lib/gx/fifo.cpp",
+      "lib/gx/fifo.hpp",
+      "lib/gx/fifo_profile.hpp",
+      "lib/gx/gx.hpp",
+      "lib/gx/regs.cpp",
+      "lib/gx/regs.hpp",
+      "lib/gx/shader_info.cpp",
+      "lib/gx/shader_info.hpp",
+      "lib/gx/texture.cpp",
+      "lib/gx/texture.hpp",
+      "lib/internal.hpp",
+      "lib/sqlite_utils.hpp",
+      "lib/webgpu/gpu_cache.cpp"
+    ],
+    "base": "Pristine Aurora revision from native/cmake/Aurora.cmake",
+    "upstreamability": "Game integration retained from SwitchWaker and adapted to Aurora APIs",
     "references": [
       "MAINTAINING.md"
     ]
@@ -28,9 +76,13 @@
       "lib/gfx/texture.cpp",
       "lib/gx/gx.cpp",
       "lib/gfx/render_worker.cpp",
-      "lib/webgpu/gpu.cpp"
+      "lib/webgpu/gpu.cpp",
+      "lib/gfx/efb.cpp",
+      "lib/gfx/efb.hpp",
+      "lib/window.cpp",
+      "lib/window.hpp"
     ],
-    "base": "SwitchWaker native/cmake/Aurora.cmake plus its native/patches/aurora series",
+    "base": "Pristine Aurora revision from native/cmake/Aurora.cmake",
     "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
     "references": [
       "MAINTAINING.md"
@@ -42,7 +94,7 @@
     "paths": [
       "tests/render_worker_test.cpp"
     ],
-    "base": "SwitchWaker native/cmake/Aurora.cmake plus its native/patches/aurora series",
+    "base": "Pristine Aurora revision from native/cmake/Aurora.cmake",
     "upstreamability": "Reusable correctness/integration candidate; review behavior and upstream equivalents before submission",
     "references": [
       "MAINTAINING.md"

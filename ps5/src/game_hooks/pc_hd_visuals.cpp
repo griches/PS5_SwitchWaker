@@ -19,6 +19,8 @@ bool enabled[Count]{}, initialized;
 int ssaoLevel = 0;
 int colourGrade = 0;
 bool fxaa = false;
+std::array<int32_t, 4> imageScissor{};
+bool imageScissorValid = false;
 int sharpening = 0;
 const char* keys[] = {"COS_HD_BLOOM","COS_HD_FAR_BLUR","COS_HD_CLOUD_SHADOWS",
     "COS_HD_EDGE_LIGHT","COS_HD_TORCH_LIGHT"};
@@ -57,23 +59,27 @@ void pc_hd_visuals_init() {
     }
 }
 void pc_hd_visuals_finish() {
+    imageScissorValid = false;
     const auto* viewport = dComIfGp_getCurrentViewport();
     if (!viewport) return;
     const auto& clip = viewport->mScissor;
+    // The painter may use a block-local cropped viewport. Retain only its values.
+    imageScissor = {static_cast<int32_t>(clip.mXOrig), static_cast<int32_t>(clip.mYOrig),
+                    static_cast<int32_t>(clip.mWidth), static_cast<int32_t>(clip.mHeight)};
+    imageScissorValid = true;
     // Pass splitting allocates renderer buffers that must outlive the current scene heap.
     JKRPcHostAllocScope hostAlloc;
     aurora_finish_world_effects(static_cast<int32_t>(clip.mXOrig), static_cast<int32_t>(clip.mYOrig),
                               static_cast<int32_t>(clip.mWidth), static_cast<int32_t>(clip.mHeight));
 }
 void pc_hd_visuals_finish_image() {
-    const auto* viewport = dComIfGp_getCurrentViewport();
-    if (!viewport) return;
-    const auto& clip = viewport->mScissor;
+    if (!imageScissorValid) return;
+    imageScissorValid = false;
     JKRPcHostAllocScope hostAlloc;
-    aurora_finish_image_effects(static_cast<int32_t>(clip.mXOrig), static_cast<int32_t>(clip.mYOrig),
-                              static_cast<int32_t>(clip.mWidth), static_cast<int32_t>(clip.mHeight));
+    aurora_finish_image_effects(imageScissor[0], imageScissor[1], imageScissor[2], imageScissor[3]);
 }
 void pc_hd_visuals_prepare(const view_class* view) {
+    imageScissorValid = false;
     pc_hd_visuals_init();
     float inv[12]{};
     if(view) std::memcpy(inv,view->mInvViewMtx,sizeof(inv));

@@ -1,5 +1,5 @@
 diff --git a/game/src/JSystem/JUtility/JUTGamePad.cpp b/game/src/JSystem/JUtility/JUTGamePad.cpp
-index 7663fc0e..88d87c4d 100644
+index 7663fc0e13a77cd4aae6abbf30afde5bf55ac92b..88d87c4dc97ed8c1aad03b844a7c43eab58a6d47 100644
 --- a/game/src/JSystem/JUtility/JUTGamePad.cpp
 +++ b/game/src/JSystem/JUtility/JUTGamePad.cpp
 @@ -6,6 +6,10 @@
@@ -56,7 +56,7 @@ index 7663fc0e..88d87c4d 100644
          mStatus[portNo] = false;
      }
 diff --git a/game/src/SSystem/SComponent/c_lib.cpp b/game/src/SSystem/SComponent/c_lib.cpp
-index 0f1f94fe..02eaf899 100644
+index 0f1f94fe43e42ac8495d304564c452ee04b21668..02eaf899a83f2f7d364c92bc506fd6836324e26a 100644
 --- a/game/src/SSystem/SComponent/c_lib.cpp
 +++ b/game/src/SSystem/SComponent/c_lib.cpp
 @@ -8,6 +8,18 @@
@@ -106,7 +106,7 @@ index 0f1f94fe..02eaf899 100644
              if (scale > maxStep) {
                  scale = maxStep;
 diff --git a/game/src/SSystem/SComponent/c_math.cpp b/game/src/SSystem/SComponent/c_math.cpp
-index 5129f61e..8c7e2185 100644
+index 5129f61eb1c5bf86f3473c0d492c7fbf3b3e91ba..8c7e21854ee2bff8d1b3faab4f979fc7617aae30 100644
 --- a/game/src/SSystem/SComponent/c_math.cpp
 +++ b/game/src/SSystem/SComponent/c_math.cpp
 @@ -111,7 +111,18 @@ static u16 atntable[] = {
@@ -129,7 +129,7 @@ index 5129f61e..8c7e2185 100644
  
  /* 802460D0-80246270       .text cM_atan2s__Fff */
 diff --git a/game/src/f_pc/f_pc_method.cpp b/game/src/f_pc/f_pc_method.cpp
-index 355f0e70..57070e11 100644
+index 355f0e70e2f82011d7fec15d2869e227d46481e9..57070e11d2db36851b0d522f17aebbf9acfdd397 100644
 --- a/game/src/f_pc/f_pc_method.cpp
 +++ b/game/src/f_pc/f_pc_method.cpp
 @@ -5,6 +5,16 @@
@@ -170,8 +170,63 @@ index 355f0e70..57070e11 100644
  }
  
  /* 8003EFA4-8003EFC8       .text fpcMtd_Create__FP20process_method_classPv */
+diff --git a/native/cmake/Aurora.cmake b/native/cmake/Aurora.cmake
+index 119c24e5d75e5b9aec390699de1e7523d2dd9f00..7c62e7693219e55d449228ce8b873b36172d848c 100644
+--- a/native/cmake/Aurora.cmake
++++ b/native/cmake/Aurora.cmake
+@@ -1,15 +1,6 @@
+-# Aurora (encounter/aurora, MIT): the GameCube SDK over WebGPU that phase 2 builds on
+-# (docs/NATIVE_PORT_PHASE2_3.md, step 2.1, decision D1).
+-#
+-# Pulled in with FetchContent at Dusklight's pin. COS_WITH_AURORA is ON by default since step 2.8,
+-# and required: the game compiles against Aurora's SDK headers (GameConfig.cmake). The settings follow Dusklight's CMakeLists.txt (AURORA_ENABLE_*, MTX_USE_PS), except
+-# RmlUi, which this port does not use.
+-#
+-# Offline or local builds point CMake's own override at a checkout of the pinned commit:
+-#   git -C ref/aurora worktree add --detach build/aurora-3227d76 3227d76
+-#   cmake ... -DFETCHCONTENT_SOURCE_DIR_AURORA=$PWD/build/aurora-3227d76
+-# Aurora's own dependencies (Dawn, nod, SDL3, abseil, fmt, ...) are still fetched once into the
+-# build directory; Dawn and nod come as prebuilt packages where Aurora publishes them.
++# Aurora renderer used by ProsperoWake. The parent repository pins its source
++# and exports the retained game fixes and PS5 integration in ps5/patches/aurora.
++# setup-source.sh prepares that checkout before configuration.
+ #
+ # Included from GameConfig.cmake first (it needs Aurora's include directory), then again from
+ # CMakeLists.txt: the guard makes the second include a no-op.
+@@ -27,8 +18,12 @@ endif ()
+ 
+ set(COS_AURORA_REPOSITORY "https://github.com/encounter/aurora.git" CACHE STRING
+         "Aurora git repository")
+-# Dusklight's pin (ref/dusklight/extern/aurora), 2026-09-29.
+-set(COS_AURORA_COMMIT "3227d76c60e1e782ca576610bce61c9e7744d8be" CACHE STRING
++# Migrate the previous renderer default in existing build directories.
++if (COS_AURORA_COMMIT STREQUAL "3227d76c60e1e782ca576610bce61c9e7744d8be")
++    unset(COS_AURORA_COMMIT CACHE)
++endif ()
++# ProsperoWake's renderer pin and rebased integration patches.
++set(COS_AURORA_COMMIT "3f8c67b35a6cf3d30f2265549ba8fdbc93f34e86" CACHE STRING
+         "Aurora commit to build")
+ 
+ # Aurora options, as in Dusklight (CMakeLists.txt:73-78). Cache defaults, so they can be overridden.
+@@ -52,14 +47,8 @@ if ((APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64") OR
+             "How to provide nod: auto, vendor (build from source), system (find_package/imported), package (download prebuilt)")
+ endif ()
+ 
+-# Aurora patches (decision H11): native/patches/aurora/*.patch, applied in name order by
+-# aurora_apply_patches.cmake. The FetchContent download gets them as its PATCH_COMMAND (the patch
+-# set's hash is part of the command, so a changed set reruns the idempotent step; a removed patch
+-# needs a fresh download: delete _deps/aurora-src and _deps/aurora-subbuild). A local
+-# FETCHCONTENT_SOURCE_DIR_AURORA checkout is never patched in place, since several build dirs
+-# share it: each build dir patches its own copy in _deps/aurora-patched-src, refreshed whenever the
+-# checkout's commit, its local changes or the patch set change, and builds from that copy.
+-set(COS_AURORA_PATCH_DIR "${CMAKE_CURRENT_LIST_DIR}/../patches/aurora")
++# The port owns the complete stack for this Aurora revision.
++set(COS_AURORA_PATCH_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../ps5/patches/aurora")
+ get_filename_component(COS_AURORA_PATCH_DIR "${COS_AURORA_PATCH_DIR}" ABSOLUTE)
+ set(_cos_aurora_patch_script "${CMAKE_CURRENT_LIST_DIR}/aurora_apply_patches.cmake")
+ file(GLOB _cos_aurora_patches LIST_DIRECTORIES false CONFIGURE_DEPENDS "${COS_AURORA_PATCH_DIR}/*.patch")
 diff --git a/native/include/pc/game_hooks.h b/native/include/pc/game_hooks.h
-index 8a4089c7..ec149876 100644
+index 8a4089c7144484f29b7e636399f41a6ce13af4bf..ec1498766e4ad79b78b323879258ed5ea9684094 100644
 --- a/native/include/pc/game_hooks.h
 +++ b/native/include/pc/game_hooks.h
 @@ -134,6 +134,11 @@ void pc_fps60_camera_reset(void);
@@ -186,8 +241,199 @@ index 8a4089c7..ec149876 100644
  /* mDoGph_Painter, before the shadow images (dComIfGd_imageDrawShadow): in paint B, decides the cut and
     points the models at their blended world-space joints already (step D: the real shadows are cast
     from the models at t); pc_fps60_view_begin does the rest. COS_FPS60_SHADOWS=0: nothing here. */
+diff --git a/native/include/sdk/dolphin/gx/GXFrameBuf.h b/native/include/sdk/dolphin/gx/GXFrameBuf.h
+index d0f4772fb021903231bf5cd8a65fb35d1f62cb1d..0bfdded0a874a0e3862da67d74916450b4672d1c 100644
+--- a/native/include/sdk/dolphin/gx/GXFrameBuf.h
++++ b/native/include/sdk/dolphin/gx/GXFrameBuf.h
+@@ -1,8 +1,5 @@
+-// Forwarder (phase 2, step 2.4): the game's dolphin/gx/GXFrameBuf.h over Aurora's <dolphin/gx.h>
+-// (GXFrameBuffer.h declares the render modes and the copy functions). Added here, as the decomp
+-// declares them: GXCopyMode (the decomp's GXEnum.h has it, Aurora's does not), GXEurgb60Hz480IntDf,
+-// GXSetDispCopyFrame2Field and GXClearBoundingBox. Nothing on the host defines the last three yet;
+-// no game unit uses them.
++// Forward the game's GXFrameBuf.h name to Aurora's framebuffer API.
++// Keep declarations for the remaining SDK symbols not exposed by Aurora.
+ #ifndef COS_SDK_DOLPHIN_GX_GXFRAMEBUF_H
+ #define COS_SDK_DOLPHIN_GX_GXFRAMEBUF_H
+ 
+@@ -12,15 +9,8 @@
+ extern "C" {
+ #endif
+ 
+-typedef enum _GXCopyMode {
+-    /* 0x0 */ GX_COPY_PROGRESSIVE,
+-    /* 0x1 */ GX_COPY_INTLC_EVEN,
+-    /* 0x2 */ GX_COPY_INTLC_ODD,
+-} GXCopyMode;
+-
+ extern GXRenderModeObj GXEurgb60Hz480IntDf;
+ 
+-void GXSetDispCopyFrame2Field(GXCopyMode mode);
+ void GXClearBoundingBox(void);
+ 
+ #ifdef __cplusplus
+diff --git a/native/sdk/src/gx/GXExtras.cpp b/native/sdk/src/gx/GXExtras.cpp
+index b3e55ec99cf73ef3978597dbbf2678481b4a0292..14cd8bd4a57fc237df824d959d311aa678cc4c49 100644
+--- a/native/sdk/src/gx/GXExtras.cpp
++++ b/native/sdk/src/gx/GXExtras.cpp
+@@ -1,41 +1,9 @@
+-// cos_sdk: the GX functions the game needs that Aurora at 3227d76 does not define
+-// (docs/NATIVE_PORT_PHASE2_3.md, step 2.6c): draw sync tokens, performance counters, GXSetMisc,
+-// the copy clamp, the XFB line arithmetic, GXAbortFrame, the current GX thread, texture cache
+-// regions, EFB alpha-read mode and colour peeks, and the FIFO base/size getters. The list is the
+-// plan's plus the census's SDK/GX bucket (link_census.txt with COS_WITH_AURORA=ON).
+-//
+-// Provenance: adapted from the "GX" section of Dusklight src/dusk/stubs.cpp (CC0, ref/dusklight),
+-// which logs and returns 0/NULL for all of these. Changed:
+-// - GXGetNumXfbLines and GXGetYScaleFactor compute what the SDK computes (the algorithm of the
+-//   decomp's src/dolphin/gx/GXFrameBuf.c) instead of returning 0: JUTXfb sizes its frame buffers
+-//   with them;
+-// - GXGetCurrentGXThread/GXSetCurrentGXThread keep the GX thread as the SDK does (GXFifo.c) instead
+-//   of returning NULL: mDoRst_reset cancels the returned thread when it is not the caller;
+-// - GXSetDrawSyncCallback keeps and returns the previous callback, and GXSetDrawSync delivers the
+-//   token (Dusklight returns the new callback and never calls it, so a screen capture would only
+-//   end through its time-out alarm);
+-// - GXInitTexCacheRegion fills the region as the SDK does (GXTexture.c);
+-// - GXSetMisc and GXSetCopyClamp keep their values; GXPokeAlphaRead keeps the mode GXPeekARGB applies;
+-// - GXGetFifoBase/GXGetFifoSize abort instead of returning NULL/0 (see below);
+-// - added: GXPokeAlphaRead and GXPeekARGB (d_snap); left out: Dusklight's GXRead*Metric/GXClear*Metric
+-//   beyond the three of the game's SDK (GXPerf.c), GXResetWriteGatherPipe, and GXWaitDrawDone, which
+-//   in the game's SDK is a static helper of GXDrawDone (GXMisc.c) that no game unit can reference.
+-//
+-// Differences from the console a caller can notice, each logged once when first reached:
+-// - GXSetDrawSync: the token counts as reached when GXSetDrawSync returns (the callback runs
+-//   inside it, with interrupts disabled as in the token interrupt), not when the GPU gets there.
+-//   Aurora's public API has no token or fence that the GPU signals, only the draw-done callback
+-//   that JUTVideo owns. The game's only user is the screen capture of m_Do_graphic.cpp (phase 6 checks
+-//   that the copied texture is ready by then);
+-// - GXSetMisc(GX_MT_DL_SAVE_CONTEXT, 0): the SDK then stops saving and restoring the GX state
+-//   around GXBeginDisplayList/GXEndDisplayList (J3DSys sets it); Aurora keeps its own
+-//   `dlSaveContext` in a private structure that its public API does not reach, so Aurora goes on
+-//   restoring it;
+-// - GXPeekARGB: Aurora can read back depth (GXPeekZ) but not colour. The pixel reads as white with
+-//   the alpha GXPokeAlphaRead selects (0xFF for GX_READ_NONE), which d_snap reads as "no object".
+-//   TODO(native phase 6): EFB colour read-back for the picture box;
+-// - the performance counters read 0. GXAbortFrame has no GPU frame to abort; it logs every call
+-//   (it is only reached after a GP hang or on reset).
++// GX compatibility functions not implemented by Aurora.
++// Adapted from Dusklight src/dusk/stubs.cpp (CC0), with SDK-compatible
++// thread tracking, texture-region initialization and draw-sync callbacks.
++// Draw-sync callbacks run synchronously; they do not wait for GPU completion.
++// Performance counters return zero and colour peeks return white with the
++// selected alpha-read mode. Frame abort logs without dropping GPU work.
+ #include "../os/os_internal.h"
+ 
+ #include <dolphin/gx.h>
+@@ -50,10 +18,6 @@ GXDrawSyncCallback sDrawSyncCallback = nullptr; // guarded by Lock()
+ u16 sDrawSyncToken = 0;                         // guarded by Lock()
+ OSThread* sGXThread = nullptr;                  // guarded by Lock(); null until first asked
+ GXAlphaReadMode sAlphaReadMode = GX_READ_NONE;  // guarded by Lock()
+-u32 sMiscXfFlush = 0;                           // guarded by Lock()
+-bool sMiscDlSaveContext = true;                 // guarded by Lock()
+-GXFBClamp sCopyClamp = static_cast<GXFBClamp>(GX_CLAMP_TOP | GX_CLAMP_BOTTOM); // guarded by Lock()
+-
+ // The GX thread before anyone set it: the thread GXInit ran on. Aurora's GXInit does not record
+ // it, so it is the default (main) OS thread, the one that runs main and, in the game, GXInit (through
+ // JFWSystem::init). Needs Lock().
+@@ -72,29 +36,6 @@ u32 SetRegField(u32 reg, u32 value, int first, int last) {
+     return (reg & ~mask) | ((value << shift) & mask);
+ }
+ 
+-// __GXGetNumXfbLines of the SDK (GXFrameBuf.c).
+-u32 NumXfbLines(u32 height, u32 scale) {
+-    const u32 numLines = (height - 1) * 0x100;
+-    u32 actualHeight = (numLines / scale) + 1;
+-    u32 newScale = scale;
+-    if (newScale > 0x80 && newScale < 0x100) {
+-        while (newScale % 2 == 0) {
+-            newScale /= 2;
+-        }
+-        if (height % newScale == 0) {
+-            actualHeight++;
+-        }
+-    }
+-    if (actualHeight > 0x400) {
+-        actualHeight = 0x400;
+-    }
+-    return actualHeight;
+-}
+-
+-u32 YScaleToReg(f32 yScale) {
+-    return static_cast<u32>(256.0f / yScale) & 0x1FF;
+-}
+-
+ // The SDK's internal view of GXTexRegion (__GXTexRegionInt), stored in Aurora's opaque one.
+ struct TexRegionInt {
+     u32 image1;     // even TMEM: base and cache size
+@@ -167,66 +108,6 @@ void GXReadXfRasMetric(u32* xf_wait_in, u32* xf_wait_out, u32* ras_busy, u32* cl
+     *clocks = 0;
+ }
+ 
+-// ---- Misc settings ----------------------------------------------------------------------------
+-
+-void GXSetMisc(GXMiscToken token, u32 val) {
+-    Guard guard;
+-    switch (token) {
+-    case GX_MT_NULL:
+-        break;
+-    case GX_MT_XF_FLUSH:
+-        // How many vertices the SDK's flush primitive sends: a GPU workaround with no host
+-        // counterpart (Aurora's __GXSendFlushPrim writes nothing).
+-        sMiscXfFlush = val;
+-        break;
+-    case GX_MT_DL_SAVE_CONTEXT:
+-        sMiscDlSaveContext = val != 0;
+-        if (!sMiscDlSaveContext) {
+-            COS_SDK_LOG_ONCE("GXSetMisc(GX_MT_DL_SAVE_CONTEXT, 0): recorded, but Aurora keeps "
+-                             "saving and restoring the GX state around display list recording");
+-        }
+-        break;
+-    default:
+-        Log("GXSetMisc: unknown token %d (value %u) ignored", static_cast<int>(token),
+-            static_cast<unsigned>(val));
+-        break;
+-    }
+-}
+-
+-void GXSetCopyClamp(GXFBClamp clamp) {
+-    // Which EFB edges the copy's vertical filter clamps at. Aurora applies no copy filter
+-    // (GXSetCopyFilter is empty), so there is nothing for the clamp to change.
+-    Guard guard;
+-    sCopyClamp = clamp;
+-}
+-
+-// ---- XFB line arithmetic (the SDK's GXFrameBuf.c) -----------------------------------------------
+-
+-u16 GXGetNumXfbLines(u16 efbHeight, f32 yScale) {
+-    return static_cast<u16>(NumXfbLines(efbHeight, YScaleToReg(yScale)));
+-}
+-
+-f32 GXGetYScaleFactor(u16 efbHeight, u16 xfbHeight) {
+-    u32 height1 = xfbHeight;
+-    f32 scale1 = static_cast<f32>(xfbHeight) / static_cast<f32>(efbHeight);
+-    u32 height2 = NumXfbLines(efbHeight, YScaleToReg(scale1));
+-
+-    while (height2 > xfbHeight) {
+-        height1--;
+-        scale1 = static_cast<f32>(height1) / static_cast<f32>(efbHeight);
+-        height2 = NumXfbLines(efbHeight, YScaleToReg(scale1));
+-    }
+-
+-    f32 scale2 = scale1;
+-    while (height2 < xfbHeight) {
+-        scale2 = scale1;
+-        height1++;
+-        scale1 = static_cast<f32>(height1) / static_cast<f32>(efbHeight);
+-        height2 = NumXfbLines(efbHeight, YScaleToReg(scale1));
+-    }
+-    return scale2;
+-}
+-
+ // ---- Frame abort and the GX thread --------------------------------------------------------------
+ 
+ void GXAbortFrame(void) {
 diff --git a/native/sdk/tests/sdk_threads.cpp b/native/sdk/tests/sdk_threads.cpp
-index 26872bbf..fef70638 100644
+index 26872bbfe65d23cdbfb13473d744a3c5a1b516f4..fef70638b8b0eb5280137a02cb8e0d38b39e688d 100644
 --- a/native/sdk/tests/sdk_threads.cpp
 +++ b/native/sdk/tests/sdk_threads.cpp
 @@ -130,6 +130,15 @@ void* BlockedReceiver(void*) {
@@ -227,7 +473,7 @@ index 26872bbf..fef70638 100644
      OSThread* self = OSGetCurrentThread();
      COS_SMOKE_CHECK(self != nullptr);
 diff --git a/native/src/pc/features/pc_hd_textures.cpp b/native/src/pc/features/pc_hd_textures.cpp
-index 19b2d71a..ad09aa28 100644
+index 19b2d71af45c687ac83dbbe4080f79982e0e385b..ad09aa28dc4f30f18790c6ffe2541930ee4de124 100644
 --- a/native/src/pc/features/pc_hd_textures.cpp
 +++ b/native/src/pc/features/pc_hd_textures.cpp
 @@ -100,8 +100,12 @@ constexpr uint64_t kDefaultCostTextureUs = 50;
@@ -244,7 +490,7 @@ index 19b2d71a..ad09aa28 100644
  uint32_t rd32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
  uint16_t rd16(const uint8_t* p) { return (uint16_t)(p[0] | p[1] << 8); }
 diff --git a/native/src/pc/features/pc_language.cpp b/native/src/pc/features/pc_language.cpp
-index e7e74969..2ca77ffe 100644
+index e7e749693c6fbb330eb8edec7f5afdc9280ca4de..2ca77ffe2e98c4d27507b1f9697770ecef5a4573 100644
 --- a/native/src/pc/features/pc_language.cpp
 +++ b/native/src/pc/features/pc_language.cpp
 @@ -13,6 +13,9 @@
@@ -322,8 +568,39 @@ index e7e74969..2ca77ffe 100644
      return chosen >= 0 ? (unsigned char)chosen : saved;
  }
  
+diff --git a/native/src/pc/harness/pc_shot.cpp b/native/src/pc/harness/pc_shot.cpp
+index aef4e19181fb56eff27457f37280d22fff6663cf..ad0b6713f6fddfabb95c2003bd318450078ee40a 100644
+--- a/native/src/pc/harness/pc_shot.cpp
++++ b/native/src/pc/harness/pc_shot.cpp
+@@ -6,7 +6,7 @@
+ //   pc_frame_count and COS_TRACE=frame: frame 1 is the first that pc_frame_end closes). Each is
+ //   saved as shot-<frame, 6 digits>.png in COS_SHOT_DIR, else COS_RUN_DIR (run.sh's run
+ //   directory), else the current directory. Without either variable this file does nothing.
+-// - The image is Aurora's present source (lib/webgpu/gpu.cpp present_source: the EFB render
++// - The image is Aurora's present source (lib/gfx/efb.cpp applied_state: the EFB render
+ //   texture, its resolved copy under MSAA) at its own size: what the present pass scales into the
+ //   window, without the letterboxing and without the ImGui overlay (COS_SHOT_IMGUI=1 draws the
+ //   frame's ImGui windows over it on the CPU: the FPS overlay, the options menu).
+@@ -29,6 +29,7 @@
+ 
+ #include <aurora/aurora.h>
+ #include <lib/gfx/render_worker.hpp>
++#include <lib/gfx/efb.hpp>
+ #include <lib/webgpu/gpu.hpp>
+ #if defined(COS_SWITCH_DEKO3D)
+ // the deko3d NRO reads textures back through its renderer (switch/deko/dk_aurora.h): Dawn's device
+@@ -222,7 +223,8 @@ bool writePng(const char* path, unsigned int frame, const std::vector<uint8_t>&
+ // Runs on the render worker, after the frame's submit and present: the present source as 8-bit
+ // RGB rows into rgb. False (logged) if it cannot be read.
+ bool readPixels(unsigned int frame, std::vector<uint8_t>& rgb, uint32_t& outWidth, uint32_t& outHeight) {
+-    const gpu::TextureWithSampler& source = gpu::present_source();
++    const auto efb = aurora::gfx::efb::applied_state();
++    const gpu::TextureWithSampler& source = efb.present_source();
+     const uint32_t width = source.size.width;
+     const uint32_t height = source.size.height;
+     if (!source.texture || width == 0 || height == 0) {
 diff --git a/native/src/pc/harness/sweeps/pc_event_sweep.cpp b/native/src/pc/harness/sweeps/pc_event_sweep.cpp
-index aeba9433..b972772c 100644
+index aeba94333a5d6e4ed2671b386d3b2439dd6d7162..b972772ce8ae811ffaad12c0c720710ea9582a5e 100644
 --- a/native/src/pc/harness/sweeps/pc_event_sweep.cpp
 +++ b/native/src/pc/harness/sweeps/pc_event_sweep.cpp
 @@ -504,10 +504,23 @@ int demoBank(const char* file) {
@@ -361,7 +638,7 @@ index aeba9433..b972772c 100644
          sChecked = true;
          if (gConfig.smoke == nullptr || strcmp(gConfig.smoke, "event-sweep") != 0) {
 diff --git a/native/src/pc/harness/sweeps/pc_save_sweep.cpp b/native/src/pc/harness/sweeps/pc_save_sweep.cpp
-index 9a9f11fd..6720a155 100644
+index 9a9f11fdb49f41e81dd0ae0cf52b75dbcbfeb801..6720a155d5d05faa0bb5e8a87e441dbaa256c50b 100644
 --- a/native/src/pc/harness/sweeps/pc_save_sweep.cpp
 +++ b/native/src/pc/harness/sweeps/pc_save_sweep.cpp
 @@ -110,6 +110,7 @@ enum State {
@@ -417,7 +694,7 @@ index 9a9f11fd..6720a155 100644
  
  } // namespace
 diff --git a/native/src/pc/pc_internal.h b/native/src/pc/pc_internal.h
-index 2c761237..7652c37d 100644
+index 2c7612372d3af085756843f8a9da94beb19907e4..7652c37d4ec273e1767d65d61b7d2ea3ce21386c 100644
 --- a/native/src/pc/pc_internal.h
 +++ b/native/src/pc/pc_internal.h
 @@ -454,6 +454,9 @@ bool menuSmokeWantsRunCard();
@@ -431,7 +708,7 @@ index 2c761237..7652c37d 100644
  // pc_menu.cpp, for COS_SMOKE=button-remap: the menu's tab (PcSettingTab), the selected row of that
  // tab and the action being captured on the Controles tab (pc::remap::Action; -1: none).
 diff --git a/native/src/pc/runtime/pc_crash.cpp b/native/src/pc/runtime/pc_crash.cpp
-index 094f6497..08447d83 100644
+index 094f6497f2bcff93bd39b2e316791a4a082cb8f2..08447d8305a7958750354ea68f8454d136173f60 100644
 --- a/native/src/pc/runtime/pc_crash.cpp
 +++ b/native/src/pc/runtime/pc_crash.cpp
 @@ -36,6 +36,10 @@
@@ -610,7 +887,7 @@ index 094f6497..08447d83 100644
      // Alternate signal stack for this (the main) thread, so a stack overflow still reports.
      static char sAltStack[256 * 1024];
 diff --git a/native/src/pc/runtime/pc_disc.cpp b/native/src/pc/runtime/pc_disc.cpp
-index 90cc87ca..384f33f4 100644
+index 90cc87cab1842174ed85a0a9cf09f1811842d74c..384f33f4e419817a18a3342299018ff10f4f9312 100644
 --- a/native/src/pc/runtime/pc_disc.cpp
 +++ b/native/src/pc/runtime/pc_disc.cpp
 @@ -13,6 +13,7 @@
@@ -734,7 +1011,7 @@ index 90cc87ca..384f33f4 100644
      return 0;
  }
 diff --git a/native/src/pc/runtime/pc_frame.cpp b/native/src/pc/runtime/pc_frame.cpp
-index 1312030e..cf928ab6 100644
+index 1312030ecb9e6cca1149916f5961f54efc8d4787..cf928ab666e832e32241f234c11f28e11e7735be 100644
 --- a/native/src/pc/runtime/pc_frame.cpp
 +++ b/native/src/pc/runtime/pc_frame.cpp
 @@ -31,6 +31,8 @@
@@ -842,7 +1119,7 @@ index 1312030e..cf928ab6 100644
      menuBackdropFrame(frames);
      itemSweepFrame(frames);
 diff --git a/native/src/pc/runtime/pc_harness.cpp b/native/src/pc/runtime/pc_harness.cpp
-index 01a83fab..d01a2e7e 100644
+index 01a83fab9ce3234c55f49ed68b918c68e85c9d8f..d01a2e7e07e3af964933346b81ce25feef99769b 100644
 --- a/native/src/pc/runtime/pc_harness.cpp
 +++ b/native/src/pc/runtime/pc_harness.cpp
 @@ -18,6 +18,12 @@
@@ -995,7 +1272,7 @@ index 01a83fab..d01a2e7e 100644
      _Exit(code);
  #endif
 diff --git a/native/src/pc/runtime/pc_main.cpp b/native/src/pc/runtime/pc_main.cpp
-index 82755f92..9675cf17 100644
+index 82755f9208da60fc060a3d901a488bf65ab512d7..9675cf17fec9791d65c036ce66fa9d1dcf2f0524 100644
 --- a/native/src/pc/runtime/pc_main.cpp
 +++ b/native/src/pc/runtime/pc_main.cpp
 @@ -1,3 +1,7 @@

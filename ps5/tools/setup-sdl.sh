@@ -4,7 +4,7 @@
 #   ps5/tools/setup-sdl.sh       fetch it into .deps/SDL (once a release), print the path
 #
 # Aurora names its SDL3 in cmake/AuroraDependencyVersions.cmake (AURORA_SDL3_REF,
-# a release tag). ps5/patches/sdl/series registers the console's video, audio and
+# a release tag). ps5/patches/sdl.patch registers the console's video, audio and
 # joystick drivers, which live in ps5/sdl/, and builds them when the toolchain
 # says PS5.
 #

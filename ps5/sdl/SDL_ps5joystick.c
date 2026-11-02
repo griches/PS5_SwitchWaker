@@ -27,6 +27,8 @@ static const uint32_t ps5_buttons[] = {
 #define PS5_AXES    6 // left x, left y, right x, right y, L2, R2
 
 static bool ps5_pad_opened;
+static bool ps5_polled;
+static Uint64 ps5_retry_at;
 static uint32_t ps5_connected;              // a bit a player, as SDL knows them
 static int ps5_device_player[PAD_PLAYERS];  // device index -> player
 static int ps5_devices;
@@ -46,15 +48,29 @@ static void PS5_ListDevices(void)
     }
 }
 
+/* Update runs before Detect in SDL. Share one fresh hardware sample across
+ * open joysticks; Detect also polls when no joystick is open yet. */
+static void PS5_Poll(void)
+{
+    if (ps5_polled) return;
+    ps5_polled = true;
+    if (!ps5_pad_opened && SDL_GetTicks() >= ps5_retry_at) {
+        ps5_pad_opened = pad_open();
+        ps5_retry_at = SDL_GetTicks() + 1000;
+    }
+    if (ps5_pad_opened) {
+        struct pad pad = {0};
+        pad_poll(&pad);
+    }
+}
+
 static void PS5_JoystickDetect(void)
 {
-    struct pad pad;
     uint32_t now;
 
-    if (!ps5_pad_opened) {
-        return;
-    }
-    pad_poll(&pad);
+    PS5_Poll();
+    ps5_polled = false;
+    if (!ps5_pad_opened) return;
     now = pad_players();
     for (int player = 0; player < PAD_PLAYERS; player++) {
         const uint32_t bit = 1u << player;
@@ -72,7 +88,6 @@ static void PS5_JoystickDetect(void)
 
 static bool PS5_JoystickInit(void)
 {
-    ps5_pad_opened = pad_open();
     PS5_JoystickDetect();
     return true;
 }
@@ -176,9 +191,9 @@ static Sint16 PS5_Trigger(float value)
 static void PS5_JoystickUpdate(SDL_Joystick *joystick)
 {
     const Uint64 timestamp = SDL_GetTicksNS();
-    struct pad pad;
+    struct pad pad = {0};
 
-    /* PS5_JoystickDetect polled the pads just before */
+    PS5_Poll();
     if (!pad_player((int)joystick->instance_id - 1, &pad) || (pad.held & PAD_INTERCEPTED)) {
         /* Release old SDL state when the shell owns the pad or it disconnects. */
         pad = (struct pad){0};

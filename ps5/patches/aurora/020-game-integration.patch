@@ -1,0 +1,4186 @@
+diff --git a/cmake/aurora_gx.cmake b/cmake/aurora_gx.cmake
+index a4adc13320a212db4f2ad3c061bbf2dcb2150ddc..c5f26fe8ec76d58174047c7973cee9835d9905d7 100644
+--- a/cmake/aurora_gx.cmake
++++ b/cmake/aurora_gx.cmake
+@@ -1,4 +1,6 @@
+ add_library(aurora_gx STATIC
++        lib/gfx/depth_peek.cpp
++        lib/gfx/census.cpp
+         lib/gfx/clear.cpp
+         lib/gfx/efb.cpp
+         lib/gfx/encoding.cpp
+diff --git a/include/aurora/pipeline_cache_save.h b/include/aurora/pipeline_cache_save.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..50d3b21f901bfcb26dfe3fe858b97a2128a5181d
+--- /dev/null
++++ b/include/aurora/pipeline_cache_save.h
+@@ -0,0 +1,20 @@
++#ifndef AURORA_PIPELINE_CACHE_SAVE_H
++#define AURORA_PIPELINE_CACHE_SAVE_H
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/**
++ * SwitchWaker patch 0023: a GX pipeline first used in a run is written to the pipeline cache file once its build has
++ * returned, so a build that crashes the process never reaches the file. This writes the ones still waiting for their
++ * build and waits for every queued write, for a clean exit that skips aurora_shutdown (the harness's _Exit). Not after
++ * a crash: the pipeline being built then may be the cause.
++ */
++void aurora_save_unbuilt_pipelines(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff --git a/include/aurora/texture.hpp b/include/aurora/texture.hpp
+index 6c6877871adcc95fe7f40ff105e997e65ad16afb..f33eaf76154deb96b7a54a7061ac0ca88c6de924 100644
+--- a/include/aurora/texture.hpp
++++ b/include/aurora/texture.hpp
+@@ -83,11 +83,34 @@ struct VirtualFileSource {
+ ReplacementRegistration register_virtual_replacement(std::string_view path, VirtualFileSource source,
+                                                      ReplacementOptions options = {});
+ 
++/// Registers many virtual replacements at once (cos_native patch 0011): one registry lock, one read
++/// state shared by the batch (an unregistration cancels the reads of the whole batch), no
++/// per-entry thumbnail queueing. `rescan` asks the texture-object cache to look the static
++/// textures up again gradually (ReplacementRuntimeConfig::rescanBudgetBytesPerFrame) instead of
++/// clearing it: pass false for all but the last batch of a pack registered over several frames.
++/// Returns one registration per path, ID 0 where the filename does not parse.
++std::vector<ReplacementRegistration> register_virtual_replacements(std::span<const std::string_view> paths,
++                                                                   VirtualFileSource source,
++                                                                   ReplacementOptions options = {},
++                                                                   bool rescan = true);
++
+ ReplacementRegistration register_replacement(ReplacementKey key, RawTextureReplacement replacement,
+                                              ReplacementOptions options = {});
+ void unregister_replacement(const ReplacementRegistration& registration);
+ void unregister_replacements(std::span<const ReplacementRegistration> registrations);
+ void unregister_replacements(const ReplacementGroup& group);
++/// Like unregister_replacements, but the texture objects that use a removed replacement keep it
++/// until the gradual rescan (rescanBudgetBytesPerFrame) looks them up again, so turning a pack off
++/// does not re-resolve (and re-upload) every original texture in one frame. `rescan`: false for
++/// all but the last batch of a pack removed over several frames.
++void unregister_replacements_gradual(std::span<const ReplacementRegistration> registrations, bool rescan = true);
++/// Queues a new full load of every cached (fully loaded) file or virtual replacement for which
++/// `predicate(userData, path, width, height, mips)` returns true, with the size of the cached GPU
++/// texture; the cached texture stays in use until the new load is published (e.g. after the
++/// source changed the size it serves). Returns the number queued. Called on the GX thread.
++size_t reload_cached_replacements(bool (*predicate)(void* userData, std::string_view path, uint32_t width,
++                                                    uint32_t height, uint32_t mips),
++                                  void* userData);
+ void unregister_replacements(const ReplacementKey& key);
+ void clear_replacements();
+ 
+@@ -97,6 +120,87 @@ void reload_replacement_directory(const std::filesystem::path& root, Replacement
+ 
+ bool has_replacement(const GXTexObj* obj, const GXTlutObj* tlut = nullptr);
+ 
++/// Runtime tuning of the replacement streamer (cos_native patch 0010). Call before registering
++/// replacements; the worker count only applies before the first load starts the worker pool.
++struct ReplacementRuntimeConfig {
++  /// GPU bytes the replacement cache may hold. Entries bound within the last `keepRecentFrames`
++  /// frames are not evicted; a load that cannot fit is dropped (the original texture stays) and
++  /// retried after `retryFrames` frames.
++  uint64_t cacheBudgetBytes = 4294967296ull;
++  /// Upload bytes published per frame (at least one texture is always published).
++  uint64_t publishBudgetBytesPerFrame = 12ull * 1024ull * 1024ull;
++  /// Queue a low-priority mip-tail ("thumbnail") read of every DDS entry at registration. Off: the
++  /// original texture is shown until the full replacement has loaded.
++  bool eagerThumbnails = true;
++  /// Loader threads; 0 = half the hardware threads, 1..4.
++  uint32_t workerCount = 0;
++  uint32_t keepRecentFrames = 60;
++  uint32_t retryFrames = 300;
++  /// Time budget of one frame's publishing (cos_native patch 0011), in an estimate of the GPU-side
++  /// work (texture creation and upload, which a deferred GL backend runs later on its own thread):
++  /// publishCostNsPerTexture + levels * publishCostNsPerLevel + MiB * publishCostNsPerMiB per
++  /// texture. 0: only the byte budget. At least one texture is always published.
++  uint64_t publishBudgetNsPerFrame = 0;
++  uint64_t publishCostNsPerTexture = 0;
++  uint64_t publishCostNsPerLevel = 0;
++  uint64_t publishCostNsPerMiB = 0;
++  /// Source bytes of static textures the texture-object cache may look up again per frame after a
++  /// gradual rescan request (register_virtual_replacements, unregister_replacements_gradual); at
++  /// least one texture per frame. 0: no limit.
++  uint64_t rescanBudgetBytesPerFrame = 0;
++};
++void set_runtime_config(const ReplacementRuntimeConfig& config) noexcept;
++ReplacementRuntimeConfig runtime_config() noexcept;
++
++/// Cumulative counters since start (or the last reset_stats), plus current cache state.
++struct ReplacementStats {
++  uint64_t lookupHits = 0;      ///< texture resolves whose source key has a replacement
++  uint64_t lookupMisses = 0;    ///< texture resolves whose source key has none
++  uint64_t loadsCompleted = 0;  ///< full loads decoded by the workers
++  uint64_t loadsFailed = 0;
++  uint64_t loadedBytes = 0;     ///< decoded texture bytes (all mips) of the completed loads
++  uint64_t loadNsTotal = 0;     ///< worker time spent in the completed and failed loads
++  uint64_t loadNsMax = 0;
++  uint64_t publishes = 0;       ///< GPU textures created from completed loads
++  uint64_t publishedBytes = 0;
++  uint64_t evictions = 0;
++  uint64_t budgetRejects = 0;   ///< completed loads dropped because the cache budget was full
++  uint64_t cacheBytes = 0;      ///< current
++  uint64_t cacheEntries = 0;    ///< current
++  uint64_t pendingLoads = 0;    ///< current
++  uint64_t registered = 0;      ///< current source-key registrations
++  // cos_native patch 0011: the GX thread's publishing, per frame.
++  uint64_t publishNsTotal = 0;     ///< time spent publishing (texture creation calls, upload copies)
++  uint64_t publishNsMax = 0;       ///< ... in the slowest frame
++  uint64_t publishEstNsMax = 0;    ///< the largest estimated cost published in one frame
++  uint64_t publishEstNsTotal = 0;  ///< the estimated cost of everything published
++  uint64_t publishMaxPerFrame = 0; ///< the most textures published in one frame
++  uint64_t publishFramesLimited = 0; ///< frames that left ready textures for later (time or bytes)
++  uint64_t reloadsQueued = 0;      ///< reload_cached_replacements loads
++};
++ReplacementStats stats() noexcept;
++void reset_stats() noexcept;
++
++/// Called with every source key the runtime computes for a static texture (a texture-object cache
++/// miss), before the replacement lookup; for census tools. Setting an observer makes the runtime
++/// compute source keys even with no replacement registered. Called on the GX thread.
++using SourceKeyObserver = void (*)(const TextureSourceKey& key, void* userData);
++void set_source_key_observer(SourceKeyObserver observer, void* userData) noexcept;
++
++/// The texture-object cache's lookups (cos_native patch 0011), cumulative: content hashing on
++/// cache misses (the GX thread), the slowest frame's hashing, texture objects looked up again by a
++/// gradual rescan, and whether a rescan is still in progress.
++struct ResolveStats {
++  uint64_t hashNsTotal = 0;
++  uint64_t hashNsMaxFrame = 0;
++  uint64_t hashedBytesTotal = 0;
++  uint64_t rescanned = 0;
++  uint64_t rescanFrames = 0;
++  bool rescanActive = false;
++};
++ResolveStats resolve_stats() noexcept;
++void reset_resolve_stats() noexcept;
++
+ } // namespace aurora::texture
+ 
+ #endif
+diff --git a/include/dolphin/gx/GXAurora.h b/include/dolphin/gx/GXAurora.h
+index 2f755f25389c1d0f194568941b1b471c1a4c8fcf..ace54ff5bd4cdede201d898e509fb410eb05ce6e 100644
+--- a/include/dolphin/gx/GXAurora.h
++++ b/include/dolphin/gx/GXAurora.h
+@@ -74,6 +74,9 @@ extern "C" {
+ 
+ #define GX_AURORA_LOAD_COPY_DEST 0x0037
+ 
++// Compatibility for the game's asynchronous GXPeekZ snapshots.
++#define GX_AURORA_REQUEST_DEPTH_SNAPSHOT 0x0038
++
+ #define GX_AURORA_BEGIN_OFFSCREEN 0x0039
+ 
+ #define GX_AURORA_END_OFFSCREEN 0x003A
+@@ -95,6 +98,27 @@ extern "C" {
+  */
+ #define GX_AURORA_DRAW_INDEXED 0x0041
+ 
++/**
++ * Sets the EFB content scale (native port, native/patches/aurora/0009): logical coordinates of the
++ * EFB (viewport, scissor, EFB copy source and destination size) map to the top-left
++ * scale x scale part of the EFB instead of all of it, so the following drawing renders at a
++ * lower resolution. Followed by one f32 in (0, 1]; 1 restores the full EFB. Offscreen targets
++ * are not affected.
++ */
++#define GX_AURORA_SET_CONTENT_SCALE 0x0060
++
++/**
++ * View delta for an interpolated repaint (native port, native/patches/aurora/0019): followed by a
++ * u8. 0 turns it off. 1 is followed by 12 f32 (C, a 3x4 row-major rigid transform), 6 f32 (the
++ * perspective projection it applies to, GXSetProjection's encoding: p[0][0], p[0][2], p[1][1],
++ * p[1][2], p[2][2], p[2][3]) and 6 f32 (the projection used instead). While on, a draw whose
++ * projection is that perspective projection is drawn with every position matrix premultiplied by C,
++ * every normal matrix and light direction by C's rotation, light positions by C, and the other
++ * projection; any other draw (orthographic, another perspective) is unchanged.
++ */
++#define GX_AURORA_SET_VIEW_DELTA 0x0061
++
++#define GX2_SET_POLYGON_OFFSET 0x1000
+ /** Sets whether subsequent draws wait for pipeline compilation. Followed by a u8 boolean. */
+ #define GX_AURORA_SET_DRAWS_BLOCKING 0x0042
+ 
+@@ -161,6 +185,14 @@ typedef enum _AuroraViewportPolicy {
+  */
+ void AuroraSetViewportPolicy(AuroraViewportPolicy policy);
+ 
++/**
++ * Sets the aspect ratio (width / height) that AURORA_VIEWPORT_FIT keeps for the content framebuffer.
++ * 0 (the default) keeps the aspect of the configured render mode (fbWidth x efbHeight, 4:3 for 640x480).
++ * A wider value presents the logical framebuffer stretched to it, the way a widescreen TV shows an
++ * anamorphic picture; viewports, scissors and copies scale as they do for any content size.
++ */
++void AuroraSetFitAspect(float aspect);
++
+ /**
+  * Retrieves the current content framebuffer size.
+  */
+@@ -197,6 +229,19 @@ void GX2SetPolygonOffset(f32 mFrontOffset, f32 mFrontScale, f32 mBackOffset, f32
+  */
+ void GXSetProjectionFull(const void* mtx);
+ 
++/**
++ * Renders what follows into the top-left `scale` fraction of the EFB (GX_AURORA_SET_CONTENT_SCALE);
++ * the current viewport and scissor are mapped again. 1 = the whole EFB.
++ */
++void AuroraSetContentScale(f32 scale);
++
++/**
++ * GX_AURORA_SET_VIEW_DELTA, recorded in the command stream (so a FIFO worker applies it to the draws
++ * written after it). delta: a 3x4 row-major matrix, or NULL to turn it off (then the other two are
++ * ignored). projFrom / projTo: six floats each in GXSetProjection's perspective encoding.
++ */
++void AuroraSetViewDelta(const f32* delta, const f32* projFrom, const f32* projTo);
++
+ /**
+  * Create an offscreen framebuffer and switch rendering to it.
+  * All subsequent GX rendering will target this framebuffer until GXRestoreFrameBuffer() is called.
+diff --git a/include/dolphin/gx/GXCpu2Efb.h b/include/dolphin/gx/GXCpu2Efb.h
+index 11fa99a0324ff0da8e5985951748440d7c3b1a46..5f89d86a695019a3093e1975abe860f3ceaca4c9 100644
+--- a/include/dolphin/gx/GXCpu2Efb.h
++++ b/include/dolphin/gx/GXCpu2Efb.h
+@@ -15,7 +15,7 @@ void GXPokeZMode(GXBool compare_enable, GXCompare func, GXBool update_enable);
+ // void GXPeekARGB(u16 x, u16 y, u32* color);
+ void GXPokeARGB(u16 x, u16 y, u32 color);
+ // Use AuroraReadbackCapturePeeks (GXAurora.h)
+-// void GXPeekZ(u16 x, u16 y, u32* z);
++void GXPeekZ(u16 x, u16 y, u32* z);
+ void GXPokeZ(u16 x, u16 y, u32 z);
+ u32 GXCompressZ16(u32 z24, GXZFmt16 zfmt);
+ u32 GXDecompressZ16(u32 z16, GXZFmt16 zfmt);
+diff --git a/lib/dolphin/dvd/dvd.cpp b/lib/dolphin/dvd/dvd.cpp
+index be7b0403d3dfd02e447df7b82d6f96c5c8127f5b..93600094689667021cfeaa907f67f333b2f9d7d5 100644
+--- a/lib/dolphin/dvd/dvd.cpp
++++ b/lib/dolphin/dvd/dvd.cpp
+@@ -10,6 +10,7 @@
+ #include <atomic>
+ #include <condition_variable>
+ #include <cstddef>
++#include <cstdlib>
+ #include <cstdint>
+ #include <cstring>
+ #include <deque>
+@@ -593,11 +594,35 @@ private:
+   std::mutex m_mutex;
+   std::condition_variable m_cv;
+   std::condition_variable m_doneCv;
++  // centollOS patch 0015: the queue's storage comes from malloc. Through the global operator new
++  // it went into whichever game heap was current on the calling thread (the game replaces
++  // operator new with its JKR heaps): a 512-byte libstdc++ node landed in the system heap when
++  // JKRAramStream read the disc and was freed only by a later read, and in a heap that a scene
++  // change destroys it would be used after being freed.
++  template <typename T>
++  struct MallocAllocator {
++    using value_type = T;
++    MallocAllocator() noexcept = default;
++    template <typename U>
++    MallocAllocator(const MallocAllocator<U>&) noexcept {}
++    T* allocate(std::size_t n) {
++      void* p = std::malloc(n * sizeof(T));
++      if (p == nullptr) {
++        std::abort();
++      }
++      return static_cast<T*>(p);
++    }
++    void deallocate(T* p, std::size_t) noexcept { std::free(p); }
++    template <typename U>
++    bool operator==(const MallocAllocator<U>&) const noexcept { return true; }
++    template <typename U>
++    bool operator!=(const MallocAllocator<U>&) const noexcept { return false; }
++  };
+   struct Command {
+     DVDCommandBlock* block;
+     CommandDataBase* handle;
+   };
+-  std::deque<Command> m_queue;
++  std::deque<Command, MallocAllocator<Command>> m_queue;
+   DVDCommandBlock* m_activeBlock = nullptr;
+   DVDCommandBlock* m_cancelActiveBlock = nullptr;
+   bool m_running = false;
+diff --git a/lib/dolphin/gx/GXAurora.cpp b/lib/dolphin/gx/GXAurora.cpp
+index e833e506a42e9c156533829323c9e78e74947386..c27eb1e53d72b17c1a3710201165e4e13b3f0118 100644
+--- a/lib/dolphin/gx/GXAurora.cpp
++++ b/lib/dolphin/gx/GXAurora.cpp
+@@ -36,6 +36,8 @@ void GXInsertDebugMarker(const char* label) {
+ 
+ void AuroraSetViewportPolicy(AuroraViewportPolicy policy) { aurora::gx::set_viewport_policy(policy); }
+ 
++void AuroraSetFitAspect(float aspect) { aurora::window::set_frame_buffer_fit_aspect(aspect); }
++
+ void AuroraGetRenderSize(u32* width, u32* height) {
+   const auto windowSize = aurora::window::get_window_size();
+   if (width != nullptr) {
+@@ -91,6 +93,30 @@ void GX2SetPolygonOffset(f32 mFrontOffset, f32 mFrontScale, f32 mBackOffset, f32
+   GX_WRITE_F32(mClamp);
+ }
+ 
++void AuroraSetContentScale(f32 scale) {
++  GX_WRITE_AURORA(GX_AURORA_SET_CONTENT_SCALE);
++  GX_WRITE_F32(scale);
++  aurora::gx::fifo::publish();
++}
++
++void AuroraSetViewDelta(const f32* delta, const f32* projFrom, const f32* projTo) {
++  GX_WRITE_AURORA(GX_AURORA_SET_VIEW_DELTA);
++  if (delta == nullptr || projFrom == nullptr || projTo == nullptr) {
++    GX_WRITE_U8(0);
++    return;
++  }
++  GX_WRITE_U8(1);
++  for (int i = 0; i < 12; ++i) {
++    GX_WRITE_F32(delta[i]);
++  }
++  for (int i = 0; i < 6; ++i) {
++    GX_WRITE_F32(projFrom[i]);
++  }
++  for (int i = 0; i < 6; ++i) {
++    GX_WRITE_F32(projTo[i]);
++  }
++}
++
+ void GXCreateFrameBuffer(u32 width, u32 height) {
+   GX_WRITE_AURORA(GX_AURORA_BEGIN_OFFSCREEN);
+   GX_WRITE_U32(width);
+diff --git a/lib/dolphin/gx/GXCpu2Efb.cpp b/lib/dolphin/gx/GXCpu2Efb.cpp
+index e2c7c51f34723345359a5c235826f6bc9f5441df..9f3f87de3eb436f4c9bb059a4b1fae9ae6ca7520 100644
+--- a/lib/dolphin/gx/GXCpu2Efb.cpp
++++ b/lib/dolphin/gx/GXCpu2Efb.cpp
+@@ -1,6 +1,20 @@
+ #include "gx.hpp"
+ #include "__gx.h"
+ 
++#include "../../gfx/depth_peek.hpp"
++
++#include <dolphin/gx/GXAurora.h>
+ #include <dolphin/gx/GXCpu2Efb.h>
+ 
+-void GXPokeAlphaRead(GXAlphaReadMode mode) { __gx->alphaRead = mode; }
++void GXPeekZ(u16 x, u16 y, u32* z) {
++  if (z != nullptr) {
++    u32 value = 0;
++    if (aurora::gfx::depth_peek::read_latest(x, y, value)) {
++      *z = value;
++    } else {
++      *z = 0;
++    }
++  }
++
++  GX_WRITE_AURORA(GX_AURORA_REQUEST_DEPTH_SNAPSHOT);
++}
+diff --git a/lib/dolphin/gx/GXFrameBuffer.cpp b/lib/dolphin/gx/GXFrameBuffer.cpp
+index 34600907239f1a774e8c503d871287bf8ec33d1c..e71bf76e6853c9f14034ea501f31f43574b1364b 100644
+--- a/lib/dolphin/gx/GXFrameBuffer.cpp
++++ b/lib/dolphin/gx/GXFrameBuffer.cpp
+@@ -18,7 +18,7 @@ aurora::Vec2<uint32_t> scale_copy_dst(u32 logicalWidth, u32 logicalHeight) {
+   }
+ 
+   const auto [logicalFbWidth, logicalFbHeight] = aurora::gx::logical_fb_size();
+-  const auto [targetWidth, targetHeight] = aurora::gfx::get_render_target_size();
++  const auto [targetWidth, targetHeight] = aurora::gfx::get_mapping_target_size();
+   if (logicalFbWidth == 0 || logicalFbHeight == 0 || targetWidth == 0 || targetHeight == 0) {
+     return {logicalWidth, logicalHeight};
+   }
+diff --git a/lib/dolphin/gx/GXLighting.cpp b/lib/dolphin/gx/GXLighting.cpp
+index 4a88255df6fb4d3b63d2e904611dc04ddab3e873..98329af7c9e04bd8fb6150689c36f7797798af06 100644
+--- a/lib/dolphin/gx/GXLighting.cpp
++++ b/lib/dolphin/gx/GXLighting.cpp
+@@ -83,7 +83,9 @@ void GXInitLightSpot(GXLightObj* light_, float cutoff, GXSpotFn spotFn) {
+ }
+ 
+ void GXInitLightDistAttn(GXLightObj* light_, float refDistance, float refBrightness, GXDistAttnFn distFunc) {
+-  if (refDistance < 0.f || refBrightness < 0.f || refBrightness >= 1.f) {
++  // As the SDK: a reference brightness of 0 (not only a negative one) turns the attenuation
++  // off; GX_DA_GENTLE with 0 would divide by zero and black out the light
++  if (refDistance < 0.f || refBrightness <= 0.f || refBrightness >= 1.f) {
+     distFunc = GX_DA_OFF;
+   }
+   float k0 = 1.f;
+diff --git a/lib/dolphin/os/OSTime.cpp b/lib/dolphin/os/OSTime.cpp
+index 7450883a474010039ef7d0d078a06b3a9f468a7a..ea4eeabf79aa3f3d50edc87c0be5dbe146052275 100644
+--- a/lib/dolphin/os/OSTime.cpp
++++ b/lib/dolphin/os/OSTime.cpp
+@@ -13,6 +13,14 @@ using SystemDuration = chrono::system_clock::duration;
+ using SystemTime = chrono::time_point<chrono::system_clock>;
+ using LocalTime = chrono::local_time<SystemDuration>;
+ 
++#if defined(__linux__)
++// Linux (centollOS patch 0013): take the localtime_r paths below instead of libstdc++'s time zone
++// database. current_zone() caches the database in objects allocated through the global operator
++// new, which the game replaces with its JKR heaps: once the heap that held them is destroyed (a
++// scene change), the next call faults (as on the Switch, whose patch 0004 avoids it too).
++#undef __cpp_lib_chrono
++#endif
++
+ namespace {
+ // GCN epoch: 2000-01-01 00:00:00 UTC = 946684800 seconds after Unix epoch
+ constexpr SystemTime kGcnEpochUnix{946684800s};
+diff --git a/lib/gfx/census.cpp b/lib/gfx/census.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..fd5fdbd764c09da54a1f8ea2a504a8bac9d5a72c
+--- /dev/null
++++ b/lib/gfx/census.cpp
+@@ -0,0 +1,207 @@
++#include "census.hpp"
++
++#include "../logging.hpp"
++#include "../webgpu/gpu.hpp"
++
++#include <algorithm>
++
++#include <atomic>
++#include <cstdlib>
++#include <cstdio>
++#include <mutex>
++
++namespace aurora::gfx::census {
++using webgpu::g_device;
++
++namespace {
++constexpr Module Log{"aurora::census"};
++constexpr uint32_t kCapacity = 16384;
++
++std::mutex g_mutex;
++std::string g_requestPath; // guarded by g_mutex
++std::atomic_int g_pending{0};
++std::shared_ptr<Capture> g_current; // recording thread
++
++void write_csv(const Capture& c, const uint64_t* samples, uint32_t count, const uint32_t* counters) {
++  const std::string drawsPath = c.path + "-draws.csv";
++  if (FILE* f = std::fopen(drawsPath.c_str(), "w")) {
++    std::fprintf(f, "draw,pass,marker,prim,vtx,merges,samples,frags,frags_kept,vp_w,vp_h,pipeline,tev,ind,alpha_test,ac0,ar0,aop,"
++                    "ac1,ar1,blend,bsrc,bdst,zcmp,zfunc,zupd,cupd,aupd,cull,fog,dst_alpha,chans,ntex,textures\n");
++    for (uint32_t i = 0; i < c.draws.size(); ++i) {
++      const auto& d = c.draws[i];
++      const uint64_t s = i < count ? samples[i] : 0;
++      std::string tex;
++      for (uint32_t t = 0; t < d.texCount && t < 8; ++t) {
++        char buf[64];
++        std::snprintf(buf, sizeof(buf), "%s%ux%u/m%u/f%u/min%u%s", t ? " " : "", d.tex[t].width, d.tex[t].height,
++                      d.tex[t].mips, d.tex[t].gxFormat, d.tex[t].minFilter, d.tex[t].isCopy ? "/copy" : "");
++        tex += buf;
++      }
++      const char* marker = d.marker >= 0 && size_t(d.marker) < c.markers.size() ? c.markers[d.marker].c_str() : "";
++      const uint32_t frags = counters != nullptr && i < count ? counters[(i + 1) * 2] : 0;
++      const uint32_t kept = counters != nullptr && i < count ? counters[(i + 1) * 2 + 1] : 0;
++      std::fprintf(f, "%u,%u,%s,%u,%u,%u,%llu,%u,%u,%.0f,%.0f,%016llx,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%s\n",
++                   i, d.pass, marker, d.prim, d.vtxCount, d.merges, (unsigned long long)s, frags, kept, d.vpWidth, d.vpHeight,
++                   (unsigned long long)d.pipelineHash, d.tevStages, d.indStages, d.alphaTest, d.alphaComp0,
++                   d.alphaRef0, d.alphaOp, d.alphaComp1, d.alphaRef1, d.blendMode, d.blendSrc, d.blendDst,
++                   d.depthCompare, d.depthFunc, d.depthUpdate, d.colorUpdate, d.alphaUpdate, d.cull, d.fog,
++                   d.dstAlpha, d.numChans, d.texCount, tex.c_str());
++    }
++    std::fclose(f);
++  } else {
++    Log.warn("census: cannot write {}", drawsPath);
++  }
++  const std::string passesPath = c.path + "-passes.csv";
++  if (FILE* f = std::fopen(passesPath.c_str(), "w")) {
++    std::fprintf(f, "op,kind,label,width,height,attachments,load,draws,resolve,detail\n");
++    for (const auto& row : c.passes) {
++      std::fprintf(f, "%s\n", row.c_str());
++    }
++    std::fclose(f);
++  }
++  Log.info("census: frame {} written to {}-*.csv ({} draws, {} passes/copies)", c.frame, c.path, c.draws.size(),
++           c.passes.size());
++}
++} // namespace
++
++bool counters_enabled() noexcept {
++  static const bool enabled = [] {
++    const char* v = std::getenv("AURORA_DRAW_CENSUS");
++    return v != nullptr && v[0] == '1';
++  }();
++  return enabled;
++}
++
++wgpu::Buffer counter_buffer() {
++  static wgpu::Buffer buffer;
++  if (!buffer && counters_enabled()) {
++    const wgpu::BufferDescriptor desc{
++        .label = "Draw census counters",
++        .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc | wgpu::BufferUsage::CopyDst,
++        .size = uint64_t(kCounterSlots) * 2 * sizeof(uint32_t),
++    };
++    buffer = g_device.CreateBuffer(&desc);
++  }
++  return buffer;
++}
++
++Capture* recording() noexcept { return g_current.get(); }
++
++std::shared_ptr<Capture> begin_frame(uint32_t frameIndex) {
++  g_current.reset();
++  std::string path;
++  {
++    std::lock_guard lock{g_mutex};
++    if (g_requestPath.empty()) {
++      return nullptr;
++    }
++    path = std::move(g_requestPath);
++    g_requestPath.clear();
++  }
++  auto capture = std::make_shared<Capture>();
++  capture->path = std::move(path);
++  capture->frame = frameIndex;
++  capture->capacity = kCapacity;
++  const wgpu::QuerySetDescriptor qsDesc{
++      .label = "Draw census",
++      .type = wgpu::QueryType::Occlusion,
++      .count = kCapacity,
++  };
++  capture->querySet = g_device.CreateQuerySet(&qsDesc);
++  capture->draws.reserve(4096);
++  g_current = capture;
++  return capture;
++}
++
++void end_frame() noexcept { g_current.reset(); }
++
++void encode_resolve(const wgpu::CommandEncoder& cmd, const std::shared_ptr<Capture>& capture) {
++  const uint32_t count = std::min<uint32_t>(static_cast<uint32_t>(capture->draws.size()), capture->capacity);
++  capture->resolved = count;
++  if (count == 0) {
++    return;
++  }
++  const uint64_t size = uint64_t(count) * sizeof(uint64_t);
++  const wgpu::BufferDescriptor resolveDesc{
++      .label = "Draw census resolve",
++      .usage = wgpu::BufferUsage::QueryResolve | wgpu::BufferUsage::CopySrc,
++      .size = size,
++  };
++  capture->resolveBuffer = g_device.CreateBuffer(&resolveDesc);
++  const wgpu::BufferDescriptor readDesc{
++      .label = "Draw census readback",
++      .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
++      .size = size,
++  };
++  capture->readbackBuffer = g_device.CreateBuffer(&readDesc);
++  cmd.ResolveQuerySet(capture->querySet, 0, count, capture->resolveBuffer, 0);
++  cmd.CopyBufferToBuffer(capture->resolveBuffer, 0, capture->readbackBuffer, 0, size);
++  if (counters_enabled()) {
++    const uint64_t counterSize = uint64_t(count + 1) * 2 * sizeof(uint32_t);
++    const wgpu::BufferDescriptor counterDesc{
++        .label = "Draw census counter readback",
++        .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
++        .size = counterSize,
++    };
++    capture->counterReadback = g_device.CreateBuffer(&counterDesc);
++    cmd.CopyBufferToBuffer(counter_buffer(), 0, capture->counterReadback, 0, counterSize);
++    cmd.ClearBuffer(counter_buffer(), 0, counterSize);
++  }
++}
++
++void after_submit(const std::shared_ptr<Capture>& capture) {
++  if (capture->resolved == 0) {
++    write_csv(*capture, nullptr, 0, nullptr);
++    g_pending.fetch_sub(1);
++    return;
++  }
++  const uint64_t size = uint64_t(capture->resolved) * sizeof(uint64_t);
++  capture->readbackBuffer.MapAsync(
++      wgpu::MapMode::Read, 0, size, wgpu::CallbackMode::AllowSpontaneous,
++      [capture, size](wgpu::MapAsyncStatus status, wgpu::StringView message) {
++        if (status != wgpu::MapAsyncStatus::Success) {
++          Log.warn("census: readback failed: {}", std::string_view{message});
++          g_pending.fetch_sub(1);
++          return;
++        }
++        if (!capture->counterReadback) {
++          const auto* samples = static_cast<const uint64_t*>(capture->readbackBuffer.GetConstMappedRange(0, size));
++          write_csv(*capture, samples, capture->resolved, nullptr);
++          capture->readbackBuffer.Unmap();
++          g_pending.fetch_sub(1);
++          return;
++        }
++        const uint64_t counterSize = uint64_t(capture->resolved + 1) * 2 * sizeof(uint32_t);
++        capture->counterReadback.MapAsync(
++            wgpu::MapMode::Read, 0, counterSize, wgpu::CallbackMode::AllowSpontaneous,
++            [capture, size, counterSize](wgpu::MapAsyncStatus status2, wgpu::StringView) {
++              const auto* samples =
++                  static_cast<const uint64_t*>(capture->readbackBuffer.GetConstMappedRange(0, size));
++              const auto* counters = status2 == wgpu::MapAsyncStatus::Success
++                                         ? static_cast<const uint32_t*>(
++                                               capture->counterReadback.GetConstMappedRange(0, counterSize))
++                                         : nullptr;
++              write_csv(*capture, samples, capture->resolved, counters);
++              capture->readbackBuffer.Unmap();
++              if (counters != nullptr) {
++                capture->counterReadback.Unmap();
++              }
++              g_pending.fetch_sub(1);
++            });
++      });
++}
++
++} // namespace aurora::gfx::census
++
++void aurora_draw_census_request(const char* pathPrefix) {
++  if (pathPrefix == nullptr || *pathPrefix == '\0') {
++    return;
++  }
++  std::lock_guard lock{aurora::gfx::census::g_mutex};
++  if (aurora::gfx::census::g_requestPath.empty()) {
++    aurora::gfx::census::g_pending.fetch_add(1);
++  }
++  aurora::gfx::census::g_requestPath = pathPrefix;
++}
++
++int aurora_draw_census_pending(void) { return aurora::gfx::census::g_pending.load() > 0 ? 1 : 0; }
+diff --git a/lib/gfx/census.hpp b/lib/gfx/census.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..5fda1b5a98f9bff2296ff19e3abb4f745e3501a1
+--- /dev/null
++++ b/lib/gfx/census.hpp
+@@ -0,0 +1,92 @@
++#pragma once
++
++// Draw census (native port, native/patches/aurora/0008): for one requested frame, every GX draw
++// with its render pass, the debug marker it follows, a summary of its pipeline and textures, and
++// the samples it wrote (an occlusion query per draw: fragments that passed the depth test and the
++// alpha compare), plus every render pass and copy of the frame. Written as CSV files after the
++// frame's GPU work completed. Off unless aurora_draw_census_request() was called; then it costs
++// one occlusion query per draw for that frame only. A diagnostic for GPU cost per pixel: which
++// draws cover how much of the screen, with what shader.
++
++#include <webgpu/webgpu_cpp.h>
++
++#include <cstdint>
++#include <memory>
++#include <string>
++#include <vector>
++
++namespace aurora::gfx::census {
++
++struct TexInfo {
++  uint16_t width = 0;
++  uint16_t height = 0;
++  uint8_t mips = 0;
++  uint8_t gxFormat = 0;
++  uint8_t minFilter = 0;
++  uint8_t isCopy = 0;
++};
++
++struct DrawInfo {
++  uint32_t pass = 0;        // index of the render pass when recorded
++  int32_t marker = -1;      // index into Capture::markers of the last marker before the draw
++  uint32_t prim = 0;
++  uint32_t vtxCount = 0;
++  uint32_t merges = 0;
++  uint64_t pipelineHash = 0;
++  uint8_t tevStages = 0;
++  uint8_t indStages = 0;
++  uint8_t alphaTest = 0;    // the alpha compare can discard
++  uint8_t alphaComp0 = 0, alphaRef0 = 0, alphaOp = 0, alphaComp1 = 0, alphaRef1 = 0;
++  uint8_t blendMode = 0, blendSrc = 0, blendDst = 0;
++  uint8_t depthCompare = 0, depthFunc = 0, depthUpdate = 0;
++  uint8_t colorUpdate = 0, alphaUpdate = 0;
++  uint8_t cull = 0;
++  uint8_t fog = 0;
++  uint8_t dstAlpha = 0;     // the draw sets destination alpha (may need an alpha prepass)
++  uint8_t numChans = 0;
++  uint8_t texCount = 0;
++  float vpWidth = 0.f, vpHeight = 0.f;
++  TexInfo tex[8]{};
++};
++
++struct Capture {
++  std::string path;          // CSV path prefix: <path>-draws.csv, <path>-passes.csv
++  uint32_t frame = 0;
++  uint32_t capacity = 0;
++  wgpu::QuerySet querySet;
++  std::vector<DrawInfo> draws;           // recording thread
++  std::vector<std::string> markers;      // recording thread
++  int32_t currentMarker = -1;            // recording thread
++  std::vector<std::string> passes;       // render worker: one CSV row per pass or copy
++  wgpu::Buffer resolveBuffer;
++  wgpu::Buffer readbackBuffer;
++  uint32_t resolved = 0;
++  wgpu::Buffer counterReadback;
++};
++
++// Fragment counters (AURORA_DRAW_CENSUS=1 in the environment at start-up, Metal's occlusion
++// queries being boolean): every GX fragment shader counts its invocations and the fragments that
++// survive its alpha compare into a storage buffer (group 0 binding 2), slot = the draw immediate's
++// census field (0 outside census frames). Shaders, layouts and pipelines change, so only for
++// diagnostic runs; off, nothing changes.
++bool counters_enabled() noexcept;
++constexpr uint32_t kCounterSlots = 16385; // slot 0 is the sink for draws outside a census frame
++wgpu::Buffer counter_buffer();
++
++// The capture of the frame being recorded, or nullptr.
++Capture* recording() noexcept;
++// Called by the recorder at the start and end of each frame.
++std::shared_ptr<Capture> begin_frame(uint32_t frameIndex);
++void end_frame() noexcept;
++// Render worker: after the frame's last pass, resolve the queries and read them back after submit.
++void encode_resolve(const wgpu::CommandEncoder& cmd, const std::shared_ptr<Capture>& capture);
++void after_submit(const std::shared_ptr<Capture>& capture);
++
++} // namespace aurora::gfx::census
++
++extern "C" {
++// Capture the next frame recorded; `pathPrefix` gets "-draws.csv" and "-passes.csv" appended.
++void aurora_draw_census_request(const char* pathPrefix);
++// 1 while a requested capture has not been written yet.
++int aurora_draw_census_pending(void);
++}
+diff --git a/lib/gfx/depth_peek.cpp b/lib/gfx/depth_peek.cpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..08f7743a08ff760628ca51ebb666fda75d9af6e6
+--- /dev/null
++++ b/lib/gfx/depth_peek.cpp
+@@ -0,0 +1,483 @@
++#include "depth_peek.hpp"
++
++#include "../dolphin/vi/vi_internal.hpp"
++#include "../gx/gx.hpp"
++#include "../gfx/render_worker.hpp"
++#include "../webgpu/gpu.hpp"
++#include "../webgpu/gpu_prof.hpp"
++
++#include <algorithm>
++#include <array>
++#include <chrono>
++#include <mutex>
++#include <string>
++
++#include <magic_enum.hpp>
++#include <tracy/Tracy.hpp>
++
++namespace aurora::gfx::depth_peek {
++namespace {
++Module Log("aurora::gfx::depth_peek");
++
++using webgpu::g_device;
++using webgpu::g_instance;
++using webgpu::g_queue;
++
++using Clock = std::chrono::steady_clock;
++
++constexpr size_t SlotCount = 3;
++constexpr uint32_t WorkgroupSizeX = 8;
++constexpr uint32_t WorkgroupSizeY = 8;
++constexpr uint32_t DepthPeekSnapshotHz = 30;
++constexpr auto SnapshotInterval = std::chrono::nanoseconds{1'000'000'000 / DepthPeekSnapshotHz};
++
++struct Params {
++  uint32_t dstWidth = 0;
++  uint32_t dstHeight = 0;
++  uint32_t srcWidth = 0;
++  uint32_t srcHeight = 0;
++  float offsetX = 0.f;
++  float offsetY = 0.f;
++  float scaleX = 1.f;
++  float scaleY = 1.f;
++};
++static_assert(sizeof(Params) == 32);
++
++struct LatestSnapshot {
++  uint32_t width = 0;
++  uint32_t height = 0;
++  std::vector<uint32_t> data;
++};
++
++enum class SlotState : uint8_t {
++  Available,
++  CopySubmitted,
++  MapPending,
++};
++
++struct Slot {
++  wgpu::Buffer storageBuffer;
++  wgpu::Buffer readbackBuffer;
++  wgpu::Buffer paramsBuffer;
++  uint32_t width = 0;
++  uint32_t height = 0;
++  uint64_t byteSize = 0;
++  SlotState state = SlotState::Available;
++};
++
++struct PendingMap {
++  size_t slotIdx = 0;
++  wgpu::Buffer readbackBuffer;
++  uint64_t byteSize = 0;
++};
++
++bool g_enabled = false;
++std::array<Slot, SlotCount> g_slots;
++size_t g_nextSlot = 0;
++wgpu::BindGroupLayout g_bindGroupLayout;
++wgpu::ComputePipeline g_pipeline;
++bool g_snapshotRequested = false;
++Clock::time_point g_nextSnapshotTime;
++LatestSnapshot g_latest;
++std::mutex g_mutex;
++
++constexpr std::string_view ShaderPreamble = R"(
++struct Params {
++    dstSize: vec2u,
++    srcSize: vec2u,
++    offset: vec2f,
++    scale: vec2f,
++};
++
++@group(0) @binding(1) var<storage, read_write> out_z: array<u32>;
++@group(0) @binding(2) var<uniform> params: Params;
++)"sv;
++
++constexpr std::string_view ReversedZBody = R"(
++fn gx_z24(depth: f32) -> u32 {
++    return min(u32(clamp(1.0 - depth, 0.0, 1.0) * 16777215.0 + 0.5), 0x00ffffffu);
++}
++)"sv;
++
++constexpr std::string_view ForwardZBody = R"(
++fn gx_z24(depth: f32) -> u32 {
++    return min(u32(clamp(depth, 0.0, 1.0) * 16777215.0 + 0.5), 0x00ffffffu);
++}
++)"sv;
++
++constexpr std::string_view ShaderMain = R"(
++@group(0) @binding(0) var src: texture_depth_2d;
++
++fn load_depth(coord: vec2i) -> f32 {
++    return textureLoad(src, coord, 0);
++}
++
++@compute @workgroup_size(8, 8, 1)
++fn cs_main(@builtin(global_invocation_id) id: vec3u) {
++    if (id.x >= params.dstSize.x || id.y >= params.dstSize.y) {
++        return;
++    }
++
++    let dstCenter = vec2f(vec2u(id.xy)) + vec2f(0.5, 0.5);
++    let srcPixel = clamp(vec2i(floor(params.offset + dstCenter * params.scale)), vec2i(0, 0),
++                         vec2i(params.srcSize) - vec2i(1, 1));
++    let depth = load_depth(srcPixel);
++    out_z[id.y * params.dstSize.x + id.x] = gx_z24(depth);
++}
++)"sv;
++
++std::string build_shader_source() {
++  std::string source;
++  source.reserve(ShaderPreamble.size() + ReversedZBody.size() + ShaderMain.size());
++  source += ShaderPreamble;
++  source += gx::UseReversedZ ? ReversedZBody : ForwardZBody;
++  source += ShaderMain;
++  return source;
++}
++
++wgpu::ComputePipeline create_pipeline(const wgpu::BindGroupLayout& bindGroupLayout, const char* label) {
++  const auto shaderSource = build_shader_source();
++  const wgpu::ShaderSourceWGSL wgslSource{wgpu::ShaderSourceWGSL::Init{
++      .code = shaderSource.c_str(),
++  }};
++  const wgpu::ShaderModuleDescriptor moduleDescriptor{
++      .nextInChain = &wgslSource,
++      .label = label,
++  };
++  const auto module = g_device.CreateShaderModule(&moduleDescriptor);
++
++  const wgpu::PipelineLayoutDescriptor layoutDescriptor{
++      .bindGroupLayoutCount = 1,
++      .bindGroupLayouts = &bindGroupLayout,
++  };
++  const auto pipelineLayout = g_device.CreatePipelineLayout(&layoutDescriptor);
++  const wgpu::ComputePipelineDescriptor pipelineDescriptor{
++      .label = label,
++      .layout = pipelineLayout,
++      .compute =
++          wgpu::ComputeState{
++              .module = module,
++              .entryPoint = "cs_main",
++          },
++  };
++  return g_device.CreateComputePipeline(&pipelineDescriptor);
++}
++
++wgpu::BindGroupLayout create_bind_group_layout(const char* label) {
++  constexpr std::array entries{
++      wgpu::BindGroupLayoutEntry{
++          .binding = 0,
++          .visibility = wgpu::ShaderStage::Compute,
++          .texture =
++              wgpu::TextureBindingLayout{
++                  .sampleType = wgpu::TextureSampleType::Depth,
++                  .viewDimension = wgpu::TextureViewDimension::e2D,
++              },
++      },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 1,
++          .visibility = wgpu::ShaderStage::Compute,
++          .buffer =
++              wgpu::BufferBindingLayout{
++                  .type = wgpu::BufferBindingType::Storage,
++              },
++      },
++      wgpu::BindGroupLayoutEntry{
++          .binding = 2,
++          .visibility = wgpu::ShaderStage::Compute,
++          .buffer =
++              wgpu::BufferBindingLayout{
++                  .type = wgpu::BufferBindingType::Uniform,
++              },
++      },
++  };
++  const wgpu::BindGroupLayoutDescriptor descriptor{
++      .label = label,
++      .entryCount = entries.size(),
++      .entries = entries.data(),
++  };
++  return g_device.CreateBindGroupLayout(&descriptor);
++}
++
++Params make_params(wgpu::Extent3D sourceSize, Vec2<uint32_t> dstSize) noexcept {
++  Params params{
++      .dstWidth = dstSize.x,
++      .dstHeight = dstSize.y,
++      .srcWidth = sourceSize.width,
++      .srcHeight = sourceSize.height,
++  };
++
++  if (gx::g_gxState.viewportPolicy == AURORA_VIEWPORT_NATIVE) {
++    return params;
++  }
++
++  const auto logicalSize = vi::configured_fb_size();
++  if (logicalSize.x == 0 || logicalSize.y == 0 || sourceSize.width == 0 || sourceSize.height == 0) {
++    return params;
++  }
++
++  const bool stretch = gx::g_gxState.viewportPolicy == AURORA_VIEWPORT_STRETCH;
++  const float scaleX = static_cast<float>(sourceSize.width) / static_cast<float>(logicalSize.x);
++  const float scaleY = static_cast<float>(sourceSize.height) / static_cast<float>(logicalSize.y);
++  const float scale = std::min(scaleX, scaleY);
++  params.scaleX = stretch ? scaleX : scale;
++  params.scaleY = stretch ? scaleY : scale;
++  params.offsetX =
++      stretch ? 0.f : (static_cast<float>(sourceSize.width) - static_cast<float>(logicalSize.x) * scale) * 0.5f;
++  params.offsetY =
++      stretch ? 0.f : (static_cast<float>(sourceSize.height) - static_cast<float>(logicalSize.y) * scale) * 0.5f;
++  return params;
++}
++
++bool ensure_slot(Slot& slot, uint32_t width, uint32_t height) {
++  const uint64_t byteSize = static_cast<uint64_t>(width) * static_cast<uint64_t>(height) * sizeof(uint32_t);
++  if (slot.storageBuffer && slot.width == width && slot.height == height && slot.byteSize == byteSize) {
++    return true;
++  }
++
++  slot.storageBuffer = {};
++  slot.readbackBuffer = {};
++  slot.paramsBuffer = {};
++  slot.width = width;
++  slot.height = height;
++  slot.byteSize = byteSize;
++
++  if (byteSize == 0 || byteSize > UINT32_MAX) {
++    return false;
++  }
++
++  const wgpu::BufferDescriptor storageDescriptor{
++      .label = "Depth Peek Storage Buffer",
++      .usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc,
++      .size = byteSize,
++  };
++  slot.storageBuffer = g_device.CreateBuffer(&storageDescriptor);
++
++  const wgpu::BufferDescriptor readbackDescriptor{
++      .label = "Depth Peek Readback Buffer",
++      .usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst,
++      .size = byteSize,
++  };
++  slot.readbackBuffer = g_device.CreateBuffer(&readbackDescriptor);
++
++  const wgpu::BufferDescriptor paramsDescriptor{
++      .label = "Depth Peek Params Buffer",
++      .usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst,
++      .size = sizeof(Params),
++  };
++  slot.paramsBuffer = g_device.CreateBuffer(&paramsDescriptor);
++  return slot.storageBuffer && slot.readbackBuffer && slot.paramsBuffer;
++}
++
++Slot* find_available_slot(uint32_t width, uint32_t height) {
++  for (size_t i = 0; i < g_slots.size(); ++i) {
++    const size_t idx = (g_nextSlot + i) % g_slots.size();
++    auto& slot = g_slots[idx];
++    if (slot.state != SlotState::Available) {
++      continue;
++    }
++    if (!ensure_slot(slot, width, height)) {
++      continue;
++    }
++    g_nextSlot = (idx + 1) % g_slots.size();
++    return &slot;
++  }
++  return nullptr;
++}
++
++void complete_slot(size_t slotIdx, wgpu::MapAsyncStatus status, wgpu::StringView message) {
++  std::lock_guard lock{g_mutex};
++  auto& slot = g_slots[slotIdx];
++  if (status == wgpu::MapAsyncStatus::Success) {
++    const auto valueCount = static_cast<size_t>(slot.width) * static_cast<size_t>(slot.height);
++    const auto* mapped =
++        static_cast<const uint32_t*>(slot.readbackBuffer.GetConstMappedRange(0, valueCount * sizeof(uint32_t)));
++    if (mapped != nullptr) {
++      g_latest.width = slot.width;
++      g_latest.height = slot.height;
++      g_latest.data.assign(mapped, mapped + valueCount);
++    }
++    slot.readbackBuffer.Unmap();
++  } else if (status != wgpu::MapAsyncStatus::CallbackCancelled && status != wgpu::MapAsyncStatus::Aborted) {
++    Log.warn("Depth Peek readback mapping failed {}: {}", magic_enum::enum_name(status), message);
++  }
++  slot.state = SlotState::Available;
++}
++} // namespace
++
++void initialize() {
++  if (!webgpu::g_hasCoreFeatures) {
++    return;
++  }
++  g_bindGroupLayout = create_bind_group_layout("Depth Peek Bind Group Layout");
++  g_pipeline = create_pipeline(g_bindGroupLayout, "Depth Peek Pipeline");
++  g_enabled = true;
++}
++
++void shutdown() {
++  testing::reset();
++  g_pipeline = {};
++  g_bindGroupLayout = {};
++  for (auto& slot : g_slots) {
++    slot = {};
++  }
++}
++
++void request_snapshot() noexcept {
++  if (!g_enabled) {
++    return;
++  }
++  std::lock_guard lock{g_mutex};
++  g_snapshotRequested = true;
++}
++
++bool read_latest(uint16_t x, uint16_t y, uint32_t& z) noexcept {
++  std::lock_guard lock{g_mutex};
++  if (x >= g_latest.width || y >= g_latest.height || g_latest.data.empty()) {
++    return false;
++  }
++  z = g_latest.data[static_cast<size_t>(y) * g_latest.width + x] & 0x00ffffffu;
++  return true;
++}
++
++void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
++                           wgpu::Extent3D sourceSize, uint32_t msaaSamples) noexcept {
++  if (!g_enabled) {
++    return;
++  }
++
++  ZoneScoped;
++  const auto now = Clock::now();
++  {
++    std::lock_guard lock{g_mutex};
++    if (!g_snapshotRequested || now < g_nextSnapshotTime) {
++      return;
++    }
++    g_snapshotRequested = false;
++    g_nextSnapshotTime = now + SnapshotInterval;
++  }
++
++  const auto dstSize = vi::configured_fb_size();
++  if (!depthView || dstSize.x == 0 || dstSize.y == 0 || sourceSize.width == 0 || sourceSize.height == 0) {
++    return;
++  }
++  if (msaaSamples > 1) {
++    Log.fatal("Depth Peek from multisampled EFB targets is not supported");
++  }
++
++  const Params params = make_params(sourceSize, dstSize);
++  wgpu::Buffer storageBuffer;
++  wgpu::Buffer readbackBuffer;
++  wgpu::Buffer paramsBuffer;
++  uint64_t byteSize = 0;
++  {
++    std::lock_guard lock{g_mutex};
++    auto* slot = find_available_slot(dstSize.x, dstSize.y);
++    if (slot == nullptr) {
++      return;
++    }
++    slot->state = SlotState::CopySubmitted;
++    storageBuffer = slot->storageBuffer;
++    readbackBuffer = slot->readbackBuffer;
++    paramsBuffer = slot->paramsBuffer;
++    byteSize = slot->byteSize;
++  }
++
++  AURORA_ASSERT(render_worker::is_worker_thread(), "Depth peek queue write must run on the render worker");
++  g_queue.WriteBuffer(paramsBuffer, 0, &params, sizeof(params));
++
++  const std::array bindGroupEntries{
++      wgpu::BindGroupEntry{
++          .binding = 0,
++          .textureView = depthView,
++      },
++      wgpu::BindGroupEntry{
++          .binding = 1,
++          .buffer = storageBuffer,
++          .size = byteSize,
++      },
++      wgpu::BindGroupEntry{
++          .binding = 2,
++          .buffer = paramsBuffer,
++          .size = sizeof(Params),
++      },
++  };
++  const wgpu::BindGroupDescriptor bindGroupDescriptor{
++      .label = "Depth Peek Bind Group",
++      .layout = g_bindGroupLayout,
++      .entryCount = bindGroupEntries.size(),
++      .entries = bindGroupEntries.data(),
++  };
++  const auto bindGroup = g_device.CreateBindGroup(&bindGroupDescriptor);
++
++  const wgpu::ComputePassDescriptor passDescriptor{
++      .label = "Depth Peek Compute Pass",
++      .timestampWrites = webgpu::gpu_prof::pass_writes("Depth peek"),
++  };
++  const auto pass = cmd.BeginComputePass(&passDescriptor);
++  pass.SetPipeline(g_pipeline);
++  pass.SetBindGroup(0, bindGroup);
++  pass.DispatchWorkgroups((dstSize.x + WorkgroupSizeX - 1) / WorkgroupSizeX,
++                          (dstSize.y + WorkgroupSizeY - 1) / WorkgroupSizeY);
++  pass.End();
++
++  cmd.CopyBufferToBuffer(storageBuffer, 0, readbackBuffer, 0, byteSize);
++}
++
++void after_submit() noexcept {
++  if (!g_enabled) {
++    return;
++  }
++
++  std::vector<PendingMap> pendingMaps;
++  {
++    std::lock_guard lock{g_mutex};
++    for (size_t i = 0; i < g_slots.size(); ++i) {
++      auto& slot = g_slots[i];
++      if (slot.state != SlotState::CopySubmitted) {
++        continue;
++      }
++      slot.state = SlotState::MapPending;
++      pendingMaps.push_back({
++          .slotIdx = i,
++          .readbackBuffer = slot.readbackBuffer,
++          .byteSize = slot.byteSize,
++      });
++    }
++  }
++
++  for (const auto& pending : pendingMaps) {
++    pending.readbackBuffer.MapAsync(
++        wgpu::MapMode::Read, 0, pending.byteSize, wgpu::CallbackMode::AllowSpontaneous,
++        [slotIdx = pending.slotIdx](wgpu::MapAsyncStatus status, wgpu::StringView message) {
++          complete_slot(slotIdx, status, message);
++        });
++  }
++}
++
++namespace testing {
++void reset() noexcept {
++  std::lock_guard lock{g_mutex};
++  g_snapshotRequested = false;
++  g_nextSlot = 0;
++  g_nextSnapshotTime = {};
++  g_latest = {};
++  for (auto& slot : g_slots) {
++    slot.state = SlotState::Available;
++  }
++}
++
++bool snapshot_requested() noexcept {
++  std::lock_guard lock{g_mutex};
++  return g_snapshotRequested;
++}
++
++void set_latest(uint32_t width, uint32_t height, const std::vector<uint32_t>& data) {
++  std::lock_guard lock{g_mutex};
++  g_latest.width = width;
++  g_latest.height = height;
++  g_latest.data = data;
++}
++} // namespace testing
++
++} // namespace aurora::gfx::depth_peek
+diff --git a/lib/gfx/depth_peek.hpp b/lib/gfx/depth_peek.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..47e9a0aadfe1b88ae7e177f226e5b05f36b681e3
+--- /dev/null
++++ b/lib/gfx/depth_peek.hpp
+@@ -0,0 +1,25 @@
++#pragma once
++
++#include "types.hpp"
++
++#include <vector>
++
++namespace aurora::gfx::depth_peek {
++
++void initialize();
++void shutdown();
++
++void request_snapshot() noexcept;
++bool read_latest(uint16_t x, uint16_t y, uint32_t& z) noexcept;
++
++void encode_frame_snapshot(const wgpu::CommandEncoder& cmd, const wgpu::TextureView& depthView,
++                           wgpu::Extent3D sourceSize, uint32_t msaaSamples) noexcept;
++void after_submit() noexcept;
++
++namespace testing {
++void reset() noexcept;
++bool snapshot_requested() noexcept;
++void set_latest(uint32_t width, uint32_t height, const std::vector<uint32_t>& data);
++} // namespace testing
++
++} // namespace aurora::gfx::depth_peek
+diff --git a/lib/gfx/pipeline_cache.hpp b/lib/gfx/pipeline_cache.hpp
+index 6f2afb5aa09ae261ce68482e805b12565adf8aa2..a1cffa7293f858d1857a403ac5bbfe878a3df3ce 100644
+--- a/lib/gfx/pipeline_cache.hpp
++++ b/lib/gfx/pipeline_cache.hpp
+@@ -33,6 +33,8 @@ struct CompiledPipeline {
+ 
+ void initialize_pipeline_cache();
+ void shutdown_pipeline_cache();
++// aurora_save_unbuilt_pipelines (include/aurora/pipeline_cache_save.h)
++void save_unbuilt_pipelines();
+ void begin_pipeline_frame();
+ void end_pipeline_frame();
+ void rebuild_pipeline_cache();
+diff --git a/lib/gfx/recording.hpp b/lib/gfx/recording.hpp
+index 2fcdc081829185f4a8b462bb4102993e92450e2a..55463d6b140bca8df8c61d0628d948d3552a1dd1 100644
+--- a/lib/gfx/recording.hpp
++++ b/lib/gfx/recording.hpp
+@@ -22,6 +22,7 @@ void record_xfb_present(imgui::DrawData drawData, wgpu::BindGroup rmlBindGroup,
+ RecordedFrame end_recording();
+ void shutdown_recording();
+ void increment_merged_draw_count() noexcept;
++void add_merged_draw_count(uint32_t count) noexcept; // SwitchWaker patch 0021
+ 
+ namespace testing {
+ struct OffscreenCacheStats {
+@@ -85,6 +86,11 @@ Range push_verts(ArrayRef<T> data, size_t alignment) {
+   return push_verts(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T), alignment);
+ }
+ Range push_indices(const uint8_t* data, size_t length, size_t alignment);
++// SwitchWaker patch 0021: `length` bytes of the frame's index buffer for the caller to write (not
++// zeroed), at `range`; nullptr outside a recording frame.
++uint8_t* map_indices(size_t length, size_t alignment, Range& range);
++// The same for the frame's vertex buffer.
++uint8_t* map_verts(size_t length, size_t alignment, Range& range);
+ template <typename T>
+ Range push_indices(ArrayRef<T> data, size_t alignment) {
+   return push_indices(reinterpret_cast<const uint8_t*>(data.data()), data.size() * sizeof(T), alignment);
+@@ -117,10 +123,19 @@ void resolve_pass_into(TextureHandle texture, ClipRect rect, bool clearColor, bo
+                        GXPixelFmt sourceFormat);
+ uint32_t align_uniform(uint32_t value);
+ Vec2<uint32_t> get_render_target_size() noexcept;
++// The size logical EFB coordinates map to (native/patches/aurora/0009): the render target, or its
++// top-left part while an EFB content scale under 1 is set (AuroraSetContentScale).
++Vec2<uint32_t> get_mapping_target_size() noexcept;
++void set_content_scale(float scale) noexcept;
++float content_scale() noexcept;
+ void set_viewport(const Viewport& viewport) noexcept;
+ void set_scissor(const ClipRect& scissor) noexcept;
+ void push_debug_group(std::string label);
+ void insert_debug_marker(std::string label);
++// Draw census (census.hpp): tag the current pass's last command, read it back, the pass index.
++void set_last_command_census(uint32_t index) noexcept;
++uint32_t last_command_census() noexcept;
++uint32_t current_pass_index() noexcept;
+ 
+ struct ReadbackCapture {
+   bool active = false;
+diff --git a/lib/gfx/texture_replacement.cpp b/lib/gfx/texture_replacement.cpp
+index 03dda4678ec0b5c9e6ca6d124d8519c90d093700..f58156596f4be3e2d6115dcddd506df49b84561f 100644
+--- a/lib/gfx/texture_replacement.cpp
++++ b/lib/gfx/texture_replacement.cpp
+@@ -20,6 +20,7 @@
+ 
+ #include <algorithm>
+ #include <array>
++#include <atomic>
+ #include <charconv>
+ #include <chrono>
+ #include <condition_variable>
+@@ -42,7 +43,39 @@ namespace aurora::texture {
+ namespace {
+ constexpr Module Log{"aurora::texture"};
+ 
+-constexpr uint64_t kReplacementCacheBudgetBytes = 4294967296; // 4GB
++// Runtime tuning (cos_native patch 0010, ReplacementRuntimeConfig in aurora/texture.hpp).
++ReplacementRuntimeConfig s_runtimeConfig;
++
++struct AtomicStats {
++  std::atomic<uint64_t> lookupHits{0};
++  std::atomic<uint64_t> lookupMisses{0};
++  std::atomic<uint64_t> loadsCompleted{0};
++  std::atomic<uint64_t> loadsFailed{0};
++  std::atomic<uint64_t> loadedBytes{0};
++  std::atomic<uint64_t> loadNsTotal{0};
++  std::atomic<uint64_t> loadNsMax{0};
++  std::atomic<uint64_t> publishes{0};
++  std::atomic<uint64_t> publishedBytes{0};
++  std::atomic<uint64_t> evictions{0};
++  std::atomic<uint64_t> budgetRejects{0};
++  std::atomic<uint64_t> publishNsTotal{0};
++  std::atomic<uint64_t> publishNsMax{0};
++  std::atomic<uint64_t> publishEstNsMax{0};
++  std::atomic<uint64_t> publishEstNsTotal{0};
++  std::atomic<uint64_t> publishMaxPerFrame{0};
++  std::atomic<uint64_t> publishFramesLimited{0};
++  std::atomic<uint64_t> reloadsQueued{0};
++};
++
++void atomic_max(std::atomic<uint64_t>& counter, uint64_t value) noexcept {
++  uint64_t prev = counter.load(std::memory_order_relaxed);
++  while (value > prev && !counter.compare_exchange_weak(prev, value, std::memory_order_relaxed)) {
++  }
++}
++AtomicStats s_atomicStats;
++
++std::atomic<SourceKeyObserver> s_sourceKeyObserver{nullptr};
++std::atomic<void*> s_sourceKeyObserverData{nullptr};
+ constexpr uint64_t kReplacementWildcardTextureHash = kWildcardTextureHash;
+ constexpr uint64_t kReplacementWildcardTlutHash = kWildcardTlutHash;
+ 
+@@ -135,6 +168,8 @@ std::mutex s_registryMutex;
+ absl::flat_hash_map<ReplacementKey, std::vector<ReplacementEntry>, ReplacementKeyHash> s_entriesByKey;
+ absl::flat_hash_map<ReplacementKey, SelectedCache, ReplacementKeyHash> s_cacheByKey;
+ absl::flat_hash_set<uint64_t> s_failedIds;
++// Entry id -> frame until which a load that did not fit the cache budget is not retried.
++absl::flat_hash_map<uint64_t, uint64_t> s_budgetRejectedUntil;
+ absl::flat_hash_set<TextureSourceKey, SourceKeyHash> s_reportedMisses;
+ std::list<ReplacementKey> s_replacementLru;
+ uint64_t s_replacementCacheBytes = 0;
+@@ -797,10 +832,26 @@ void worker_main(std::stop_token token) {
+         texture = std::move(thumbnail->texture);
+         thumbnailIncludesBase = thumbnail->includesBase;
+       }
+-    } else if (job.entry.kind == EntryKind::File) {
+-      texture = load_file_replacement(job.entry);
+-    } else if (job.entry.kind == EntryKind::Virtual) {
+-      texture = load_virtual_replacement(job.entry);
++    } else {
++      const auto loadStart = std::chrono::steady_clock::now();
++      if (job.entry.kind == EntryKind::File) {
++        texture = load_file_replacement(job.entry);
++      } else if (job.entry.kind == EntryKind::Virtual) {
++        texture = load_virtual_replacement(job.entry);
++      }
++      const auto loadNs = static_cast<uint64_t>(
++          std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - loadStart).count());
++      s_atomicStats.loadNsTotal.fetch_add(loadNs, std::memory_order_relaxed);
++      uint64_t prevMax = s_atomicStats.loadNsMax.load(std::memory_order_relaxed);
++      while (loadNs > prevMax &&
++             !s_atomicStats.loadNsMax.compare_exchange_weak(prevMax, loadNs, std::memory_order_relaxed)) {
++      }
++      if (texture.has_value()) {
++        s_atomicStats.loadsCompleted.fetch_add(1, std::memory_order_relaxed);
++        s_atomicStats.loadedBytes.fetch_add(texture->data.size(), std::memory_order_relaxed);
++      } else {
++        s_atomicStats.loadsFailed.fetch_add(1, std::memory_order_relaxed);
++      }
+     }
+ 
+     if (job.tier == Tier::Thumbnail && texture.has_value() && !is_unsupported_texture_format(texture->format) &&
+@@ -841,7 +892,9 @@ void start_worker_pool() {
+   }
+   const uint32_t hardwareThreads = std::max(std::thread::hardware_concurrency(), 1u);
+   const uint32_t workerCount =
+-      s_workerCountOverride != 0 ? s_workerCountOverride : std::clamp(hardwareThreads / 2, 1u, 4u);
++      s_workerCountOverride != 0       ? s_workerCountOverride
++      : s_runtimeConfig.workerCount != 0 ? std::clamp(s_runtimeConfig.workerCount, 1u, 4u)
++                                         : std::clamp(hardwareThreads / 2, 1u, 4u);
+   for (uint32_t i = 0; i < workerCount; ++i) {
+     s_workers.emplace_back(
+         thread::Options{
+@@ -902,7 +955,7 @@ void queue_thumbnail_load(const EntryLoadSnapshot& entry) {
+   if constexpr (!gx::texture::AsyncTextureReplacements || gx::texture::ReplacementThumbnailDim == 0) {
+     return;
+   }
+-  if (!is_dds_entry(entry)) {
++  if (!is_dds_entry(entry) || !s_runtimeConfig.eagerThumbnails) {
+     return;
+   }
+   start_worker_pool();
+@@ -950,8 +1003,15 @@ bool publish_fits_budget(uint64_t publishedCount, uint64_t publishedBytes, uint6
+   if (publishedCount == 0) {
+     return true;
+   }
+-  return nextBytes <= gx::texture::ReplacementPublishBudgetBytes &&
+-         publishedBytes <= gx::texture::ReplacementPublishBudgetBytes - nextBytes;
++  const uint64_t budget = s_runtimeConfig.publishBudgetBytesPerFrame;
++  return nextBytes <= budget && publishedBytes <= budget - nextBytes;
++}
++
++// The estimated GPU-side cost of publishing a texture (ReplacementRuntimeConfig, patch 0011).
++uint64_t publish_cost_ns(const gfx::ConvertedTexture& texture, uint64_t uploadBytes) noexcept {
++  const auto& c = s_runtimeConfig;
++  return c.publishCostNsPerTexture + static_cast<uint64_t>(texture.mips) * c.publishCostNsPerLevel +
++         static_cast<uint64_t>(static_cast<double>(uploadBytes) / 1048576.0 * static_cast<double>(c.publishCostNsPerMiB));
+ }
+ 
+ std::string entry_path_for_log(const ReplacementEntry& entry) {
+@@ -987,6 +1047,15 @@ gfx::TextureHandle create_converted_texture_handle(const EntryLoadSnapshot& entr
+   auto handle = std::make_shared<gfx::TextureRef>(std::move(texture), std::move(textureView), wgpu::TextureView{}, size,
+                                                   replacement.format, replacement.mips, gfx::InvalidTextureFormat);
+   handle->isReplacement = true;
++  // Dolphin's "_arb" suffix: the replacement's mips are arbitrary (authored effects, e.g. water),
++  // so the sampler selects them as the original texture's mips would be (shader_info.cpp).
++  if (replacement.mips > 1) {
++    std::string name = entry.kind == EntryKind::Virtual ? entry.virtualPath : io::fs_path_to_string(entry.path);
++    if (const size_t dot = name.rfind('.'); dot != std::string::npos) {
++      name.resize(dot);
++    }
++    handle->hasArbitraryMips = name.size() >= 4 && name.compare(name.size() - 4, 4, "_arb") == 0;
++  }
+   aurora::gfx::write_texture(*handle, replacement.data);
+   return handle;
+ }
+@@ -1033,17 +1102,61 @@ void touch_cached_replacement(decltype(s_cacheByKey)::iterator it) noexcept {
+   }
+ }
+ 
+-void evict_replacement_cache_if_needed() noexcept {
+-  while (s_replacementCacheBytes > kReplacementCacheBudgetBytes && !s_replacementLru.empty()) {
+-    const auto key = s_replacementLru.back();
++bool replacement_used_recently(uint64_t id) noexcept {
++  const uint64_t keep = s_runtimeConfig.keepRecentFrames;
++  if (keep == 0) {
++    return false;
++  }
++  const uint64_t now = gx::texture::frame_count();
++  const uint64_t last = gx::texture::replacement_last_used_frame(id);
++  return last != 0 && (last >= now || now - last < keep);
++}
++
++// Evicts least recently looked-up entries that were not bound recently until `incomingBytes` more
++// fit the budget. Returns whether they fit.
++bool evict_for_locked(uint64_t incomingBytes) noexcept {
++  const uint64_t budget = s_runtimeConfig.cacheBudgetBytes;
++  if (s_replacementCacheBytes + incomingBytes <= budget) {
++    return true;
++  }
++  std::vector<ReplacementKey> victims;
++  uint64_t freed = 0;
++  for (auto it = s_replacementLru.rbegin(); it != s_replacementLru.rend(); ++it) {
++    if (s_replacementCacheBytes - freed + incomingBytes <= budget) {
++      break;
++    }
++    const auto cache = s_cacheByKey.find(*it);
++    if (cache == s_cacheByKey.end() || replacement_used_recently(cache->second.id)) {
++      continue;
++    }
++    victims.push_back(*it);
++    freed += cache->second.bytes;
++  }
++  for (const auto& key : victims) {
+     const auto cache = s_cacheByKey.find(key);
+     const uint64_t id = cache == s_cacheByKey.end() ? 0 : cache->second.id;
+     erase_cache_locked(key);
++    s_atomicStats.evictions.fetch_add(1, std::memory_order_relaxed);
+     if (id != 0) {
+       gx::texture::invalidate_replacement(id);
+       gx::texture::invalidate_bindings();
+     }
+   }
++  return s_replacementCacheBytes + incomingBytes <= budget;
++}
++
++void evict_replacement_cache_if_needed() noexcept { evict_for_locked(0); }
++
++bool budget_rejected_locked(uint64_t id) noexcept {
++  const auto it = s_budgetRejectedUntil.find(id);
++  if (it == s_budgetRejectedUntil.end()) {
++    return false;
++  }
++  if (gx::texture::frame_count() < it->second) {
++    return true;
++  }
++  s_budgetRejectedUntil.erase(it);
++  return false;
+ }
+ 
+ void cache_replacement_locked(const ReplacementKey& key, uint64_t id, gfx::TextureHandle handle, Tier tier) noexcept {
+@@ -1153,7 +1266,8 @@ find_replacement_for_key_locked(const ReplacementKey& key) noexcept {
+ 
+   if (const auto cache = s_cacheByKey.find(key); cache != s_cacheByKey.end() && cache->second.id == entry->id) {
+     touch_cached_replacement(cache);
+-    if (cache->second.tier == Tier::Thumbnail && !s_failedIds.contains(entry->id)) {
++    if (cache->second.tier == Tier::Thumbnail && !s_failedIds.contains(entry->id) &&
++        !budget_rejected_locked(entry->id)) {
+       queue_full_load(snapshot_entry(key, *entry));
+     }
+     return gfx::texture_replacement::ReplacementResult{.handle = cache->second.handle, .id = entry->id};
+@@ -1173,7 +1287,7 @@ find_replacement_for_key_locked(const ReplacementKey& key) noexcept {
+         tier = entry->thumbnailIncludesBase ? Tier::Full : Tier::Thumbnail;
+         cache_replacement_locked(key, entry->id, thumbnailHandle, tier);
+       }
+-      if (tier != Tier::Full && !s_failedIds.contains(entry->id)) {
++      if (tier != Tier::Full && !s_failedIds.contains(entry->id) && !budget_rejected_locked(entry->id)) {
+         queue_full_load(snapshot_entry(key, *entry));
+       }
+       return gfx::texture_replacement::ReplacementResult{.handle = std::move(thumbnailHandle), .id = entry->id};
+@@ -1342,6 +1456,7 @@ void clear_replacement_runtime_state_locked(std::vector<std::shared_ptr<VirtualR
+   s_entriesByKey.clear();
+   s_cacheByKey.clear();
+   s_failedIds.clear();
++  s_budgetRejectedUntil.clear();
+   s_reportedMisses.clear();
+   s_replacementLru.clear();
+   s_replacementCacheBytes = 0;
+@@ -1618,6 +1733,103 @@ ReplacementRegistration register_virtual_replacement(std::string_view path, Virt
+   return registration;
+ }
+ 
++std::vector<ReplacementRegistration> register_virtual_replacements(std::span<const std::string_view> paths,
++                                                                   VirtualFileSource source,
++                                                                   ReplacementOptions options, bool rescan) {
++  std::vector<ReplacementRegistration> registrations(paths.size());
++  if (source.read == nullptr) {
++    return registrations;
++  }
++  // Parsed before taking the lock: the GX thread looks textures up under it.
++  std::vector<std::optional<TextureSourceKey>> keys(paths.size());
++  for (size_t i = 0; i < paths.size(); ++i) {
++    const auto path = paths[i];
++    const size_t slash = path.rfind('/');
++    keys[i] = parse_replacement_filename(slash == std::string_view::npos ? path : path.substr(slash + 1));
++  }
++  const auto readState = std::make_shared<VirtualReadState>();
++  {
++    std::lock_guard lk(s_registryMutex);
++    for (size_t i = 0; i < paths.size(); ++i) {
++      if (!keys[i].has_value()) {
++        continue;
++      }
++      ReplacementKey replacementKey{*keys[i]};
++      registrations[i] = ReplacementRegistration{
++          .id = s_nextRegistrationId++,
++          .key = replacementKey,
++      };
++      auto& entries = s_entriesByKey[replacementKey];
++      entries.push_back({
++          .id = registrations[i].id,
++          .priority = options.priority,
++          .sequence = s_nextSequence++,
++          .kind = EntryKind::Virtual,
++          .virtualPath = std::string{paths[i]},
++          .source = source,
++          .virtualReadState = readState,
++      });
++      ++s_sourceEntryCount;
++      erase_cache_locked(replacementKey);
++    }
++  }
++  if (rescan) {
++    gx::texture::request_rescan(false);
++  }
++  return registrations;
++}
++
++void unregister_replacements_gradual(std::span<const ReplacementRegistration> registrations, bool rescan) {
++  std::vector<std::shared_ptr<VirtualReadState>> waitStates;
++  {
++    std::lock_guard lk(s_registryMutex);
++    for (const auto& registration : registrations) {
++      if (registration.id != 0) {
++        unregister_replacement_locked(registration, waitStates);
++      }
++    }
++  }
++  // A batch shares one read state: wait for each distinct one once.
++  std::sort(waitStates.begin(), waitStates.end());
++  waitStates.erase(std::unique(waitStates.begin(), waitStates.end()), waitStates.end());
++  wait_for_virtual_reads(waitStates);
++  if (rescan) {
++    gx::texture::request_rescan(true);
++  }
++}
++
++size_t reload_cached_replacements(bool (*predicate)(void* userData, std::string_view path, uint32_t width,
++                                                    uint32_t height, uint32_t mips),
++                                  void* userData) {
++  if (predicate == nullptr) {
++    return 0;
++  }
++  std::vector<EntryLoadSnapshot> reloads;
++  {
++    std::lock_guard lk(s_registryMutex);
++    for (const auto& [key, cache] : s_cacheByKey) {
++      if (cache.tier != Tier::Full || !cache.handle) {
++        continue;
++      }
++      const auto* entry = find_selected_entry_locked(key);
++      if (entry == nullptr || entry->id != cache.id || entry->kind == EntryKind::Raw) {
++        continue;
++      }
++      const std::string pathString =
++          entry->kind == EntryKind::Virtual ? entry->virtualPath : io::fs_path_to_string(entry->path);
++      if (predicate(userData, pathString, cache.handle->size.width, cache.handle->size.height,
++                    cache.handle->mipCount)) {
++        reloads.push_back(snapshot_entry(key, *entry));
++      }
++    }
++  }
++  for (const auto& snapshot : reloads) {
++    queue_full_load(snapshot);
++  }
++  s_atomicStats.reloadsQueued.fetch_add(reloads.size(), std::memory_order_relaxed);
++  return reloads.size();
++}
++
+ ReplacementGroup load_replacement_directory(const std::filesystem::path& root, ReplacementOptions options) {
+   ReplacementGroup group;
+   if (root.empty() || !io::create_directories(root)) {
+@@ -1688,6 +1900,68 @@ void reload_replacement_directory(const std::filesystem::path& root, Replacement
+   group = load_replacement_directory(root, options);
+ }
+ 
++void set_runtime_config(const ReplacementRuntimeConfig& config) noexcept {
++  std::lock_guard lk(s_registryMutex);
++  s_runtimeConfig = config;
++  if (s_runtimeConfig.cacheBudgetBytes == 0) {
++    s_runtimeConfig.cacheBudgetBytes = 1;
++  }
++  gx::texture::set_rescan_budget(s_runtimeConfig.rescanBudgetBytesPerFrame);
++}
++
++ReplacementRuntimeConfig runtime_config() noexcept {
++  std::lock_guard lk(s_registryMutex);
++  return s_runtimeConfig;
++}
++
++ReplacementStats stats() noexcept {
++  ReplacementStats out{
++      .lookupHits = s_atomicStats.lookupHits.load(std::memory_order_relaxed),
++      .lookupMisses = s_atomicStats.lookupMisses.load(std::memory_order_relaxed),
++      .loadsCompleted = s_atomicStats.loadsCompleted.load(std::memory_order_relaxed),
++      .loadsFailed = s_atomicStats.loadsFailed.load(std::memory_order_relaxed),
++      .loadedBytes = s_atomicStats.loadedBytes.load(std::memory_order_relaxed),
++      .loadNsTotal = s_atomicStats.loadNsTotal.load(std::memory_order_relaxed),
++      .loadNsMax = s_atomicStats.loadNsMax.load(std::memory_order_relaxed),
++      .publishes = s_atomicStats.publishes.load(std::memory_order_relaxed),
++      .publishedBytes = s_atomicStats.publishedBytes.load(std::memory_order_relaxed),
++      .evictions = s_atomicStats.evictions.load(std::memory_order_relaxed),
++      .budgetRejects = s_atomicStats.budgetRejects.load(std::memory_order_relaxed),
++      .publishNsTotal = s_atomicStats.publishNsTotal.load(std::memory_order_relaxed),
++      .publishNsMax = s_atomicStats.publishNsMax.load(std::memory_order_relaxed),
++      .publishEstNsMax = s_atomicStats.publishEstNsMax.load(std::memory_order_relaxed),
++      .publishEstNsTotal = s_atomicStats.publishEstNsTotal.load(std::memory_order_relaxed),
++      .publishMaxPerFrame = s_atomicStats.publishMaxPerFrame.load(std::memory_order_relaxed),
++      .publishFramesLimited = s_atomicStats.publishFramesLimited.load(std::memory_order_relaxed),
++      .reloadsQueued = s_atomicStats.reloadsQueued.load(std::memory_order_relaxed),
++  };
++  {
++    std::lock_guard lk(s_registryMutex);
++    out.cacheBytes = s_replacementCacheBytes;
++    out.cacheEntries = s_cacheByKey.size();
++    out.registered = s_sourceEntryCount;
++  }
++  out.pendingLoads = pending_full_load_count();
++  return out;
++}
++
++void reset_stats() noexcept {
++  for (auto* counter : {&s_atomicStats.lookupHits, &s_atomicStats.lookupMisses, &s_atomicStats.loadsCompleted,
++                        &s_atomicStats.loadsFailed, &s_atomicStats.loadedBytes, &s_atomicStats.loadNsTotal,
++                        &s_atomicStats.loadNsMax, &s_atomicStats.publishes, &s_atomicStats.publishedBytes,
++                        &s_atomicStats.evictions, &s_atomicStats.budgetRejects, &s_atomicStats.publishNsTotal,
++                        &s_atomicStats.publishNsMax, &s_atomicStats.publishEstNsMax, &s_atomicStats.publishEstNsTotal,
++                        &s_atomicStats.publishMaxPerFrame, &s_atomicStats.publishFramesLimited,
++                        &s_atomicStats.reloadsQueued}) {
++    counter->store(0, std::memory_order_relaxed);
++  }
++}
++
++void set_source_key_observer(SourceKeyObserver observer, void* userData) noexcept {
++  s_sourceKeyObserverData.store(userData, std::memory_order_release);
++  s_sourceKeyObserver.store(observer, std::memory_order_release);
++}
++
+ bool has_replacement(const GXTexObj* obj, const GXTlutObj* tlut) {
+   const auto* obj_ = reinterpret_cast<const GXTexObj_*>(obj);
+   if (tlut != nullptr) {
+@@ -1760,6 +2034,9 @@ StreamingStats process_streaming() noexcept {
+ 
+   StreamingStats stats;
+   std::vector<LoadCompletion> deferred;
++  const auto publishStart = std::chrono::steady_clock::now();
++  uint64_t estimatedNs = 0;
++  bool limited = false;
+   for (auto& completion : s_readyPublishes) {
+     bool selected = false;
+     {
+@@ -1778,9 +2055,30 @@ StreamingStats process_streaming() noexcept {
+     const uint64_t bytes = converted_upload_bytes(*completion.texture);
+     if (!publish_fits_budget(stats.publishes, stats.publishBytes, bytes)) {
+       deferred.push_back(std::move(completion));
++      limited = true;
++      continue;
++    }
++    const uint64_t costNs = publish_cost_ns(*completion.texture, bytes);
++    if (stats.publishes != 0 && s_runtimeConfig.publishBudgetNsPerFrame != 0 &&
++        estimatedNs + costNs > s_runtimeConfig.publishBudgetNsPerFrame) {
++      deferred.push_back(std::move(completion));
++      limited = true;
+       continue;
+     }
+ 
++    {
++      // Make room first; a load that cannot fit (everything else bound recently) is dropped and
++      // retried later, the original texture staying in place.
++      std::lock_guard lock{s_registryMutex};
++      const uint64_t gpuBytes = gfx::calc_texture_size(completion.texture->format, completion.texture->width,
++                                                       completion.texture->height, completion.texture->mips);
++      if (!evict_for_locked(gpuBytes)) {
++        s_budgetRejectedUntil[completion.entry.id] = gx::texture::frame_count() + s_runtimeConfig.retryFrames;
++        s_atomicStats.budgetRejects.fetch_add(1, std::memory_order_relaxed);
++        finish_full_load(completion.entry.id);
++        continue;
++      }
++    }
+     auto handle = create_converted_texture_handle(completion.entry, *completion.texture);
+     bool published = false;
+     {
+@@ -1801,8 +2099,23 @@ StreamingStats process_streaming() noexcept {
+     gx::texture::invalidate_bindings();
+     ++stats.publishes;
+     stats.publishBytes += bytes;
++    estimatedNs += costNs;
++    s_atomicStats.publishes.fetch_add(1, std::memory_order_relaxed);
++    s_atomicStats.publishedBytes.fetch_add(bytes, std::memory_order_relaxed);
+   }
+   s_readyPublishes = std::move(deferred);
++  if (stats.publishes != 0) {
++    const auto publishNs = static_cast<uint64_t>(
++        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - publishStart).count());
++    s_atomicStats.publishNsTotal.fetch_add(publishNs, std::memory_order_relaxed);
++    atomic_max(s_atomicStats.publishNsMax, publishNs);
++    atomic_max(s_atomicStats.publishEstNsMax, estimatedNs);
++    s_atomicStats.publishEstNsTotal.fetch_add(estimatedNs, std::memory_order_relaxed);
++    atomic_max(s_atomicStats.publishMaxPerFrame, stats.publishes);
++  }
++  if (limited) {
++    s_atomicStats.publishFramesLimited.fetch_add(1, std::memory_order_relaxed);
++  }
+   stats.pendingLoads = pending_full_load_count();
+   return stats;
+ }
+@@ -1810,6 +2123,8 @@ StreamingStats process_streaming() noexcept {
+ std::optional<ReplacementResult> find_source_replacement_locked(const GXTexObj_& obj,
+                                                                 const TextureSourceKey& sourceKey) noexcept {
+   const auto replacementKey = find_source_replacement_key_locked(sourceKey);
++  (replacementKey.has_value() ? s_atomicStats.lookupHits : s_atomicStats.lookupMisses)
++      .fetch_add(1, std::memory_order_relaxed);
+   if (!replacementKey.has_value()) {
+     const bool alwaysReportMissingKey = false; // Enable for debugging
+     if (g_config.allowTextureDumps || alwaysReportMissingKey) {
+@@ -1838,6 +2153,9 @@ std::optional<ReplacementResult> find_pointer_replacement(const GXTexObj_& obj)
+ std::optional<ReplacementResult> find_source_replacement(const GXTexObj_& obj,
+                                                          const TextureSourceKey& sourceKey) noexcept {
+   ZoneScoped;
++  if (const auto observer = s_sourceKeyObserver.load(std::memory_order_acquire); observer != nullptr) {
++    observer(sourceKey, s_sourceKeyObserverData.load(std::memory_order_acquire));
++  }
+   std::lock_guard lk(s_registryMutex);
+   if (s_sourceEntryCount == 0 && !g_config.allowTextureDumps) {
+     return std::nullopt;
+@@ -1846,6 +2164,9 @@ std::optional<ReplacementResult> find_source_replacement(const GXTexObj_& obj,
+ }
+ 
+ bool should_build_source_key() noexcept {
++  if (s_sourceKeyObserver.load(std::memory_order_acquire) != nullptr) {
++    return true;
++  }
+   std::lock_guard lk(s_registryMutex);
+   return s_sourceEntryCount != 0 || g_config.allowTextureDumps;
+ }
+diff --git a/lib/gx/command_processor.cpp b/lib/gx/command_processor.cpp
+index be59752677a594d6d7aa2aca3a61ec0d51c64352..00d0ad7271165eeee9ed1d1525a5400327ed0998 100644
+--- a/lib/gx/command_processor.cpp
++++ b/lib/gx/command_processor.cpp
+@@ -1,9 +1,13 @@
+ #include "command_processor.hpp"
+ 
++#include "../gfx/census.hpp"
++#include "../gfx/depth_peek.hpp"
++#include "../gfx/hash.hpp"
+ #include "../gfx/recording.hpp"
+ #include "../internal.hpp"
+ #include "dolphin/gd/GDGeometry.h"
+ #include "dolphin/gx/GXAurora.h"
++#include "fifo_profile.hpp"
+ #include "gx.hpp"
+ #include "pipeline.hpp"
+ #include "readback.hpp"
+@@ -17,6 +21,7 @@
+ #include <cmath>
+ #include <cstdint>
+ #include <span>
++#include <unordered_map>
+ #include <vector>
+ 
+ namespace aurora::gx::fifo {
+@@ -26,9 +31,13 @@ constexpr Module Log{"aurora::gx::fifo"};
+ u16 prepare_idx_buffer(ByteBuffer& buf, GXPrimitive prim, u16 vtxStart, u16 vtxCount) noexcept {
+   u16 numIndices = 0;
+   if (prim == GX_QUADS) {
+-    buf.reserve_extra((vtxCount / 4) * 6 * sizeof(u16));
++    buf.reserve_extra(((vtxCount / 4) * 6 + 3) * sizeof(u16));
+ 
+-    for (u16 v = 0; v < vtxCount; v += 4) {
++    // Only whole quads; the hardware draws three vertices left over as a triangle (the game
++    // draws its stars and sun rays as GX_QUADS of 3 vertices; Dolphin's IndexGenerator AddQuads
++    // does the same) and ignores one or two
++    u16 v = 0;
++    for (; v + 4 <= vtxCount; v += 4) {
+       u16 idx0 = vtxStart + v;
+       u16 idx1 = vtxStart + v + 1;
+       u16 idx2 = vtxStart + v + 2;
+@@ -44,6 +53,12 @@ u16 prepare_idx_buffer(ByteBuffer& buf, GXPrimitive prim, u16 vtxStart, u16 vtxC
+       buf.append(idx0);
+       numIndices += 3;
+     }
++    if (vtxCount - v == 3) {
++      buf.append(static_cast<u16>(vtxStart + v));
++      buf.append(static_cast<u16>(vtxStart + v + 1));
++      buf.append(static_cast<u16>(vtxStart + v + 2));
++      numIndices += 3;
++    }
+   } else if (prim == GX_TRIANGLES) {
+     buf.reserve_extra(vtxCount * sizeof(u16));
+     for (u16 v = 0; v < vtxCount; ++v) {
+@@ -93,6 +108,130 @@ u16 prepare_idx_buffer(ByteBuffer& buf, GXPrimitive prim, u16 vtxStart, u16 vtxC
+   return numIndices;
+ }
+ 
++// SwitchWaker patch 0021: indices a primitive of `vtxCount` vertices adds (as prepare_idx_buffer appends).
++u32 idx_count(GXPrimitive prim, u16 vtxCount) noexcept {
++  switch (prim) {
++  case GX_QUADS:
++    return (vtxCount / 4) * 6 + (vtxCount % 4 == 3 ? 3 : 0);
++  case GX_TRIANGLES:
++    return vtxCount;
++  case GX_TRIANGLEFAN:
++  case GX_TRIANGLESTRIP:
++    return vtxCount <= 3 ? vtxCount : 3 + (static_cast<u32>(vtxCount) - 3) * 3;
++  case GX_LINES:
++  case GX_LINESTRIP:
++  case GX_POINTS:
++    return 6;
++  default:
++    UNLIKELY FATAL("unsupported primitive type {}", static_cast<u32>(prim));
++  }
++}
++
++// prepare_idx_buffer's indices written to `out` (idx_count(prim, vtxCount) of them).
++void write_idx(u16* out, GXPrimitive prim, u16 vtxStart, u16 vtxCount) noexcept {
++  switch (prim) {
++  case GX_QUADS: {
++    u16 v = 0;
++    for (; v + 4 <= vtxCount; v += 4) {
++      const u16 i0 = vtxStart + v;
++      out[0] = i0;
++      out[1] = i0 + 1;
++      out[2] = i0 + 2;
++      out[3] = i0 + 2;
++      out[4] = i0 + 3;
++      out[5] = i0;
++      out += 6;
++    }
++    if (vtxCount - v == 3) {
++      out[0] = vtxStart + v;
++      out[1] = vtxStart + v + 1;
++      out[2] = vtxStart + v + 2;
++    }
++    break;
++  }
++  case GX_TRIANGLES:
++    for (u16 v = 0; v < vtxCount; ++v) {
++      out[v] = vtxStart + v;
++    }
++    break;
++  case GX_TRIANGLEFAN:
++  case GX_TRIANGLESTRIP: {
++    const u16 head = vtxCount < 3 ? vtxCount : 3;
++    for (u16 v = 0; v < head; ++v) {
++      *out++ = vtxStart + v;
++    }
++    if (prim == GX_TRIANGLEFAN) {
++      for (u16 v = 3; v < vtxCount; ++v) {
++        const u16 idx = vtxStart + v;
++        out[0] = vtxStart;
++        out[1] = idx - 1;
++        out[2] = idx;
++        out += 3;
++      }
++    } else {
++      for (u16 v = 3; v < vtxCount; ++v) {
++        const u16 idx = vtxStart + v;
++        const bool even = (v & 1) == 0;
++        out[0] = even ? idx - 2 : idx - 1;
++        out[1] = even ? idx - 1 : idx - 2;
++        out[2] = idx;
++        out += 3;
++      }
++    }
++    break;
++  }
++  default: {
++    static constexpr u16 kQuad[6] = {0, 1, 3, 3, 2, 0};
++    std::memcpy(out, kQuad, sizeof(kQuad));
++    break;
++  }
++  }
++}
++
++bool sFastPaths = true;
++
++// Pipeline lookups of this frame by (pipeline config, render target layout): a draw state seen earlier in
++// the frame reuses its shader info and pipeline ref. Valid for one frame (clear_draw_cache) so each state
++// still goes through pipeline_ref once a frame (remembered for the cache, promoted while it compiles).
++struct PipelineMemoEntry {
++  uint64_t frame = 0;
++  ShaderInfo shaderInfo{};
++  gfx::PipelineRef pipelineRef{};
++};
++std::unordered_map<HashType, PipelineMemoEntry> sPipelineMemo;
++uint64_t sPipelineMemoFrame = 1;
++
++// Texture bind groups of this frame by what build_bind_groups reads: each sampled slot's texture view and
++// sampler descriptor. Skips the per-slot sampler cache lookups (hash, lock, refcounts) and the bind group
++// descriptor's hash and lock for a texture set seen earlier in the frame. Valid for one frame, as the
++// pipeline memo (bind_group_ref marks a bind group used once a frame); the entry holds the slots' texture
++// handles so no view address is reused while it can match.
++struct BindMemoEntry {
++  uint64_t frame = 0;
++  GXBindGroups bindGroups{};
++  std::array<decltype(gfx::TextureBind::ref), MaxTextures> textures{};
++};
++std::unordered_map<HashType, BindMemoEntry> sBindMemo;
++
++constexpr size_t kSamplerKeyOffset = offsetof(wgpu::SamplerDescriptor, addressModeU);
++constexpr size_t kSamplerKeySize = sizeof(wgpu::SamplerDescriptor) - kSamplerKeyOffset - 2;
++
++HashType bind_memo_key(const ShaderInfo& info) noexcept {
++  std::array<u8, MaxTextures*(sizeof(void*) + kSamplerKeySize)> key{};
++  u8* out = key.data();
++  for (u32 i = 0; i < MaxTextures; ++i, out += sizeof(void*) + kSamplerKeySize) {
++    const auto& tex = g_gxState.textures[i];
++    if (!tex || !(info.sampledTextures[i] || info.sampledIndTextures[i])) {
++      continue;
++    }
++    const void* view = tex.ref->sampleTextureView.Get();
++    std::memcpy(out, &view, sizeof(void*));
++    const wgpu::SamplerDescriptor desc = tex.get_descriptor();
++    std::memcpy(out + sizeof(void*), reinterpret_cast<const u8*>(&desc) + kSamplerKeyOffset, kSamplerKeySize);
++  }
++  return xxh3_hash_s(key.data(), key.size(), info.sampledTextures.any() || info.sampledIndTextures.any());
++}
++
+ // GX FIFO opcodes - use CP_ prefix to avoid clashing with GXCommandList.h macros
+ constexpr u8 CP_CMD_NOP = GX_NOP;
+ constexpr u8 CP_CMD_LOAD_CP_REG = GX_LOAD_CP_REG;
+@@ -227,7 +366,11 @@ ProcessResult process(const u8* data, u32 size) noexcept {
+ 
+     case CP_CMD_LOAD_BP_REG: {
+       const u32 value = reader.read<u32>();
+-      handle_bp(value);
++      profile::count(AURORA_FIFO_PROFILE_BP_LOADS);
++      if (!sFastPaths || !bp_redundant(value)) {
++        profile::Scope prof{AURORA_FIFO_PROFILE_BP};
++        handle_bp(value);
++      }
+       if (reg_get(value, 8, 24) == GX_BP_REG_DRAWDONE) {
+         return {static_cast<u32>(reader.offset()), true};
+       }
+@@ -236,6 +379,7 @@ ProcessResult process(const u8* data, u32 size) noexcept {
+ 
+     case CP_CMD_LOAD_CP_REG: {
+       const u8 addr = reader.read<u8>();
++      profile::Scope prof{AURORA_FIFO_PROFILE_CP};
+       handle_cp(addr, reader.read<u32>());
+       break;
+     }
+@@ -244,6 +388,8 @@ ProcessResult process(const u8* data, u32 size) noexcept {
+       const u32 header = reader.read<u32>();
+       const u32 count = ((header >> 16) & 0xFFFF) + 1;
+       const u16 addr = header & 0xFFFF;
++      profile::Scope prof{AURORA_FIFO_PROFILE_XF};
++      profile::count(AURORA_FIFO_PROFILE_XF_LOADS);
+       handle_xf(addr, reader.take(count * sizeof(u32)));
+       break;
+     }
+@@ -253,6 +399,8 @@ ProcessResult process(const u8* data, u32 size) noexcept {
+     case CP_CMD_LOAD_INDX_C:
+     case CP_CMD_LOAD_INDX_D: {
+       ZoneScopedN("LOAD_INDX");
++      profile::Scope prof{AURORA_FIFO_PROFILE_XF};
++      profile::count(AURORA_FIFO_PROFILE_XF_LOADS);
+       const u32 arrayType = GX_POS_MTX_ARRAY + (opcode - CP_CMD_LOAD_INDX_A) / 0x08;
+       const u16 srcArrayIdx = reader.read<u16>();
+       const u16 addrLen = reader.read<u16>();
+@@ -379,18 +527,85 @@ static u32 calc_vtx_size(GXVtxFmt fmt) noexcept {
+   return vtxSize;
+ }
+ 
++// Draw census (native/patches/aurora/0008, lib/gfx/census.hpp): what the draw just pushed is.
++static void census_record(GXPrimitive prim, u16 vtxCount, const PipelineConfig& config,
++                          const ShaderInfo& info) noexcept {
++  auto* capture = gfx::census::recording();
++  if (capture == nullptr || capture->draws.size() >= capture->capacity) {
++    return;
++  }
++  const auto& state = g_gxState;
++  const auto& sc = config.shaderConfig;
++  gfx::census::DrawInfo d{};
++  d.pass = gfx::current_pass_index();
++  d.marker = capture->currentMarker;
++  d.prim = prim;
++  d.vtxCount = vtxCount;
++  d.pipelineHash = sDrawCache.pipelineRef;
++  d.tevStages = static_cast<uint8_t>(sc.tevStageCount);
++  d.indStages = static_cast<uint8_t>(sc.numIndStages);
++  d.alphaTest = sc.alphaCompare ? 1 : 0;
++  d.alphaComp0 = sc.alphaCompare.comp0;
++  d.alphaRef0 = static_cast<uint8_t>(sc.alphaCompare.ref0);
++  d.alphaOp = sc.alphaCompare.op;
++  d.alphaComp1 = sc.alphaCompare.comp1;
++  d.alphaRef1 = static_cast<uint8_t>(sc.alphaCompare.ref1);
++  d.blendMode = config.blendMode;
++  d.blendSrc = config.blendFacSrc;
++  d.blendDst = config.blendFacDst;
++  d.depthCompare = config.depthCompare;
++  d.depthFunc = config.depthFunc;
++  d.depthUpdate = config.depthUpdate;
++  d.colorUpdate = config.colorUpdate;
++  d.alphaUpdate = config.alphaUpdate;
++  d.cull = config.cullMode;
++  d.fog = sc.fogType;
++  d.dstAlpha = config.dstAlpha != UINT32_MAX ? 1 : 0;
++  d.numChans = state.numChans;
++  d.vpWidth = state.renderViewport.width;
++  d.vpHeight = state.renderViewport.height;
++  for (u32 i = 0; i < MaxTextures && d.texCount < 8; ++i) {
++    if (!info.sampledTextures.test(i)) {
++      continue;
++    }
++    auto& t = d.tex[d.texCount++];
++    const auto& bind = state.textures[i];
++    if (bind.ref) {
++      t.width = static_cast<uint16_t>(bind.ref->size.width);
++      t.height = static_cast<uint16_t>(bind.ref->size.height);
++      t.mips = static_cast<uint8_t>(bind.ref->mipCount);
++      t.gxFormat = static_cast<uint8_t>(bind.ref->gxFormat);
++    }
++    t.minFilter = static_cast<uint8_t>(state.loadedTextures[i].min_filter());
++    t.isCopy = state.copyTextures.contains(state.loadedTextures[i].data) ? 1 : 0;
++  }
++  const auto index = static_cast<uint32_t>(capture->draws.size());
++  capture->draws.push_back(d);
++  gfx::set_last_command_census(index);
++}
++
+ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Range vertRange, gfx::Range idxRange,
+                          u32 numIndices) noexcept {
+   auto& state = g_gxState;
+   auto& cache = sDrawCache;
+ 
+   DrawImmediateData immediates{.vtxStart = vertRange.offset, .currentPnMtx = state.currentPnMtx};
++  if (auto* capture = gfx::census::recording())
++    UNLIKELY {
++      // Draw census fragment counters: this draw's slot (census_record below appends it).
++      if (gfx::census::counters_enabled() && capture->draws.size() < capture->capacity) {
++        immediates._pad = static_cast<u32>(capture->draws.size()) + 1;
++      }
++    }
++  profile::count(AURORA_FIFO_PROFILE_DRAWS);
+   for (int i = GX_VA_POS; i <= GX_VA_TEX7; ++i) {
+     if (state.vtxDesc[i] != GX_INDEX8 && state.vtxDesc[i] != GX_INDEX16) {
+       continue;
+     }
+     auto& array = state.arrays[i];
+     if (array.cachedRange.size == 0) {
++      profile::Scope prof{AURORA_FIFO_PROFILE_ARRAYS};
++      profile::count(AURORA_FIFO_PROFILE_ARRAY_BYTES, array.size);
+       array.cachedRange = gfx::push_storage(static_cast<const uint8_t*>(array.data), array.size);
+     }
+     immediates.arrayStart[i - GX_VA_POS] = array.cachedRange.offset;
+@@ -401,15 +616,38 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+   const bool pipelineValid = cache.hasPipeline && (state.dirty & DirtyPipeline) == 0 && cache.fmt == fmt &&
+                              cache.lineMode == lineMode && cache.targetLayoutKey == targetLayoutKey;
+   if (!pipelineValid) {
++    profile::Scope prof{AURORA_FIFO_PROFILE_PIPELINE};
++    profile::count(AURORA_FIFO_PROFILE_PIPELINES);
+     const bool hadPipeline = cache.hasPipeline;
+     const auto prevSampledTextures = cache.shaderInfo.sampledTextures;
+     const auto prevSampledIndTextures = cache.shaderInfo.sampledIndTextures;
+     populate_pipeline_config(cache.config, prim, fmt);
+-    cache.shaderInfo = build_shader_info(cache.config.shaderConfig);
++    if (sFastPaths && !g_gxState.drawsBlocking) {
++      const auto key = xxh3_hash(cache.config, targetLayoutKey);
++      auto [it, inserted] = sPipelineMemo.try_emplace(key);
++      auto& memo = it->second;
++      if (!inserted && memo.frame == sPipelineMemoFrame) {
++        profile::count(AURORA_FIFO_PROFILE_PIPELINE_MEMO_HITS);
++        cache.shaderInfo = memo.shaderInfo;
++        cache.pipelineRef = memo.pipelineRef;
++      } else {
++        cache.shaderInfo = build_shader_info(cache.config.shaderConfig);
++        {
++          profile::Scope profLookup{AURORA_FIFO_PROFILE_PIPELINE_LOOKUP};
++          cache.pipelineRef = gfx::pipeline_ref(cache.config);
++        }
++        memo.frame = sPipelineMemoFrame;
++        memo.shaderInfo = cache.shaderInfo;
++        memo.pipelineRef = cache.pipelineRef;
++      }
++    } else {
++      cache.shaderInfo = build_shader_info(cache.config.shaderConfig);
++      profile::Scope profLookup{AURORA_FIFO_PROFILE_PIPELINE_LOOKUP};
++      cache.pipelineRef = gfx::pipeline_ref(cache.config);
++    }
+ #ifndef NDEBUG
+     validate_shader_config(cache.config.shaderConfig, cache.shaderInfo, g_gxState.numTexGens);
+ #endif
+-    cache.pipelineRef = gfx::pipeline_ref(cache.config);
+     cache.targetLayoutKey = targetLayoutKey;
+     cache.fmt = fmt;
+     cache.lineMode = lineMode;
+@@ -424,9 +662,30 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+   const bool bindGroupsValid =
+       (state.dirty & DirtyTextures) == 0 && cache.bindGeneration == texture::current_bind_generation();
+   if (!bindGroupsValid) {
++    profile::Scope prof{AURORA_FIFO_PROFILE_BIND};
++    profile::count(AURORA_FIFO_PROFILE_BINDS);
+     const auto prevBindGroup = cache.bindGroups.textureBindGroup;
+-    resolve_sampled_textures(cache.shaderInfo);
+-    cache.bindGroups = build_bind_groups(cache.shaderInfo);
++    {
++      profile::Scope profTextures{AURORA_FIFO_PROFILE_TEXTURES};
++      resolve_sampled_textures(cache.shaderInfo);
++    }
++    if (sFastPaths) {
++      auto [it, inserted] = sBindMemo.try_emplace(bind_memo_key(cache.shaderInfo));
++      auto& memo = it->second;
++      if (!inserted && memo.frame == sPipelineMemoFrame) {
++        profile::count(AURORA_FIFO_PROFILE_BIND_MEMO_HITS);
++        cache.bindGroups = memo.bindGroups;
++      } else {
++        cache.bindGroups = build_bind_groups(cache.shaderInfo);
++        memo.frame = sPipelineMemoFrame;
++        memo.bindGroups = cache.bindGroups;
++        for (u32 i = 0; i < MaxTextures; ++i) {
++          memo.textures[i] = g_gxState.textures[i].ref;
++        }
++      }
++    } else {
++      cache.bindGroups = build_bind_groups(cache.shaderInfo);
++    }
+     cache.bindGeneration = texture::current_bind_generation();
+     state.dirty &= ~DirtyTextures;
+     // For texture_size_bias uniform
+@@ -437,7 +696,10 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+ 
+   const bool uniformValid = (state.dirty & DirtyUniform) == 0 && cache.uniformRange.size != 0;
+   if (!uniformValid) {
++    profile::Scope prof{AURORA_FIFO_PROFILE_UNIFORM};
++    profile::count(AURORA_FIFO_PROFILE_UNIFORMS);
+     cache.uniformRange = build_uniform(cache.shaderInfo);
++    profile::count(AURORA_FIFO_PROFILE_UNIFORM_BYTES, cache.uniformRange.size);
+     state.dirty &= ~DirtyUniform;
+   }
+   if (cache.config.shaderConfig.fogRangeEnabled) {
+@@ -461,6 +723,7 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+     instanceCount = vtxCount;
+   }
+   cache.lastDrawFmt = fmt;
++  profile::Scope profCommand{AURORA_FIFO_PROFILE_COMMAND};
+   gfx::push_draw_command(DrawData{
+       .pipeline = cache.pipelineRef,
+       .bindGroups = cache.bindGroups,
+@@ -473,6 +736,8 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
+       .instanceCount = instanceCount,
+       .dstAlpha = state.dstAlpha,
+   });
++  if (gfx::census::recording() != nullptr)
++    UNLIKELY { census_record(prim, vtxCount, cache.config, cache.shaderInfo); }
+ }
+ 
+ static void handle_draw_unmerged(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Range vertRange) noexcept {
+@@ -480,7 +745,12 @@ static void handle_draw_unmerged(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, g
+   u32 numIndices = 0;
+   gfx::Range idxRange;
+ 
+-  if (prim != GX_TRIANGLES) {
++  if (prim != GX_TRIANGLES && sFastPaths) {
++    numIndices = idx_count(prim, vtxCount);
++    if (auto* out = gfx::map_indices(numIndices * sizeof(u16), 4, idxRange)) {
++      write_idx(reinterpret_cast<u16*>(out), prim, 0, vtxCount);
++    }
++  } else if (prim != GX_TRIANGLES) {
+     ZoneScopedN("build idx buffer");
+     static ByteBuffer idxBuf;
+     numIndices = prepare_idx_buffer(idxBuf, prim, 0, vtxCount);
+@@ -491,7 +761,118 @@ static void handle_draw_unmerged(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, g
+   push_gx_draw(prim, fmt, vtxCount, vertRange, idxRange, numIndices);
+ }
+ 
++static void draw_prim_one(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& reader) noexcept;
++
++// SwitchWaker patch 0021: the draw commands that follow a draw in the stream with the same vertex format
++// (display lists are runs of short strips), merged into the last draw command in one go: what
++// draw_prim_one's merge does per primitive (same vertex bytes, same indices), with one look-up of the
++// last command, one vertex and one index reservation and no per-primitive checks. Stops at anything
++// else, at line/point primitives, past 0xFFFF vertices in the draw, or while the draw census records.
++static void merge_run(GXVtxFmt fmt, u32 vtxSize, ByteReader& reader) noexcept {
++  struct Prim {
++    GXPrimitive prim;
++    u16 vtxCount;
++    const u8* data;
++  };
++  static std::vector<Prim> run;
++  if (g_gxState.dirty != 0 || fmt != sDrawCache.lastDrawFmt || sDrawCache.lineMode != 0 ||
++      gfx::census::recording() != nullptr) {
++    return;
++  }
++  auto* lastDraw = gfx::get_last_draw_command<DrawData>();
++  if (lastDraw == nullptr || lastDraw->instanceCount != 1) {
++    return;
++  }
++  run.clear();
++  u32 runVerts = 0;
++  bool anyIndexed = false;
++  ByteReader scan = reader;
++  while (scan.remaining() >= 3) {
++    const u8 cmd = scan.data()[scan.offset()];
++    if (cmd < 0x80 || cmd >= 0xC0 || static_cast<GXVtxFmt>(cmd & CP_VAT_MASK) != fmt) {
++      break;
++    }
++    const auto prim = static_cast<GXPrimitive>(cmd & CP_OPCODE_MASK);
++    if (prim == GX_LINES || prim == GX_LINESTRIP || prim == GX_POINTS) {
++      break;
++    }
++    ByteReader peek = scan;
++    peek.skip(1);
++    const u16 count = peek.read<u16>();
++    const u32 bytes = count * vtxSize;
++    if (bytes > peek.remaining() || lastDraw->vtxCount + runVerts + count > 0xFFFF) {
++      break;
++    }
++    run.push_back({prim, count, peek.data() + peek.offset()});
++    runVerts += count;
++    anyIndexed |= prim != GX_TRIANGLES;
++    peek.skip(bytes);
++    scan = peek;
++  }
++  if (run.empty()) {
++    return;
++  }
++  reader = scan;
++
++  gfx::Range vertRange;
++  if (auto* out = gfx::map_verts(runVerts * vtxSize, 0, vertRange)) {
++    for (const auto& p : run) {
++      std::memcpy(out, p.data, p.vtxCount * vtxSize);
++      out += p.vtxCount * vtxSize;
++    }
++  }
++  CHECK(lastDraw->vertRange.offset + lastDraw->vertRange.size == vertRange.offset,
++        "Non-consecutive vertex ranges ({} < {})", lastDraw->vertRange.offset + lastDraw->vertRange.size,
++        vertRange.offset);
++
++  // Indices: as draw_prim_one makes them one primitive at a time. An unindexed draw stays so while only
++  // triangle lists join it; the first other primitive indexes everything before it as a triangle list.
++  if (lastDraw->indexCount != 0 || anyIndexed) {
++    const bool hadIndexRange = lastDraw->idxRange.size != 0;
++    const u32 prevCount = lastDraw->indexCount == 0 ? idx_count(GX_TRIANGLES, lastDraw->vtxCount) : 0;
++    u32 runIndices = 0;
++    for (const auto& p : run) {
++      runIndices += idx_count(p.prim, p.vtxCount);
++    }
++    gfx::Range idxRange;
++    if (auto* out = reinterpret_cast<u16*>(
++            gfx::map_indices((prevCount + runIndices) * sizeof(u16), hadIndexRange ? 0 : 4, idxRange))) {
++      if (prevCount != 0) {
++        write_idx(out, GX_TRIANGLES, 0, lastDraw->vtxCount);
++        out += prevCount;
++      }
++      u16 start = lastDraw->vtxCount;
++      for (const auto& p : run) {
++        write_idx(out, p.prim, start, p.vtxCount);
++        out += idx_count(p.prim, p.vtxCount);
++        start += p.vtxCount;
++      }
++    }
++    if (hadIndexRange) {
++      CHECK(lastDraw->idxRange.offset + lastDraw->idxRange.size == idxRange.offset,
++            "Non-consecutive index ranges ({} < {})", lastDraw->idxRange.offset + lastDraw->idxRange.size,
++            idxRange.offset);
++      lastDraw->idxRange.size += idxRange.size;
++    } else {
++      lastDraw->idxRange = idxRange;
++    }
++    lastDraw->indexCount += prevCount + runIndices;
++  }
++  lastDraw->vertRange.size += vertRange.size;
++  lastDraw->vtxCount += runVerts;
++  gfx::detail::add_merged_draw_count(static_cast<u32>(run.size()));
++  profile::count(AURORA_FIFO_PROFILE_MERGED, run.size());
++  profile::count(AURORA_FIFO_PROFILE_VERTEX_BYTES, runVerts * vtxSize);
++}
++
+ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& reader) noexcept {
++  draw_prim_one(prim, fmt, vtxCount, reader);
++  if (sFastPaths) {
++    merge_run(fmt, g_gxState.lastVtxSize, reader);
++  }
++}
++
++static void draw_prim_one(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& reader) noexcept {
+   ZoneScoped;
+   u32 vtxSize;
+   if (g_gxState.lastVtxFmt == fmt)
+@@ -510,9 +891,54 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader&
+ 
+   // Push raw vertex data to buffer. Merged draws must remain contiguous with the previous range.
+   const auto vertexData = reader.take(totalVtxBytes);
++  profile::count(AURORA_FIFO_PROFILE_VERTEX_BYTES, totalVtxBytes);
+   gfx::Range vertRange = gfx::push_verts(vertexData.data(), vertexData.size(), canMerge ? 0 : 4);
+ 
+-  // Try to merge with previous draw call
++  // Try to merge with previous draw call (patch 0021's fast path: the indices written in place)
++  if (canMerge && sFastPaths) {
++    const bool hadIndexRange = lastDraw->idxRange.size != 0;
++    const bool indexPrev = lastDraw->indexCount == 0 && prim != GX_TRIANGLES;
++    u32 numIndices = 0;
++    if (indexPrev || lastDraw->indexCount != 0) {
++      const u32 prevCount = indexPrev ? idx_count(GX_TRIANGLES, lastDraw->vtxCount) : 0;
++      numIndices = idx_count(prim, vtxCount);
++      gfx::Range idxRange;
++      auto* out = reinterpret_cast<u16*>(
++          gfx::map_indices((prevCount + numIndices) * sizeof(u16), hadIndexRange ? 0 : 4, idxRange));
++      if (out != nullptr) {
++        if (indexPrev) {
++          write_idx(out, GX_TRIANGLES, 0, lastDraw->vtxCount);
++          lastDraw->indexCount = prevCount;
++        }
++        write_idx(out + prevCount, prim, lastDraw->vtxCount, vtxCount);
++      }
++      if (hadIndexRange) {
++        CHECK(lastDraw->idxRange.offset + lastDraw->idxRange.size == idxRange.offset,
++              "Non-consecutive index ranges ({} < {})", lastDraw->idxRange.offset + lastDraw->idxRange.size,
++              idxRange.offset);
++        lastDraw->idxRange.size += idxRange.size;
++      } else {
++        lastDraw->idxRange = idxRange;
++      }
++    }
++    CHECK(lastDraw->vertRange.offset + lastDraw->vertRange.size == vertRange.offset,
++          "Non-consecutive vertex ranges ({} < {})", lastDraw->vertRange.offset + lastDraw->vertRange.size,
++          vertRange.offset);
++    lastDraw->vertRange.size += vertRange.size;
++    lastDraw->vtxCount += vtxCount;
++    lastDraw->indexCount += numIndices;
++    if (auto* capture = gfx::census::recording())
++      UNLIKELY {
++        const auto index = gfx::last_command_census();
++        if (index < capture->draws.size()) {
++          capture->draws[index].vtxCount += vtxCount;
++          capture->draws[index].merges++;
++        }
++      }
++    gfx::detail::increment_merged_draw_count();
++    profile::count(AURORA_FIFO_PROFILE_MERGED);
++    return;
++  }
+   if (canMerge) {
+     u32 numIndices = 0;
+     gfx::Range idxRange;
+@@ -543,7 +969,16 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader&
+     }
+     lastDraw->vtxCount += vtxCount;
+     lastDraw->indexCount += numIndices;
++    if (auto* capture = gfx::census::recording())
++      UNLIKELY {
++        const auto index = gfx::last_command_census();
++        if (index < capture->draws.size()) {
++          capture->draws[index].vtxCount += vtxCount;
++          capture->draws[index].merges++;
++        }
++      }
+     gfx::detail::increment_merged_draw_count();
++    profile::count(AURORA_FIFO_PROFILE_MERGED);
+     return;
+   }
+ 
+@@ -553,12 +988,15 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader&
+ static void handle_draw(u8 cmd, ByteReader& reader) noexcept {
+   const auto fmt = static_cast<GXVtxFmt>(cmd & CP_VAT_MASK);
+   const auto prim = static_cast<GXPrimitive>(cmd & CP_OPCODE_MASK);
++  profile::Scope prof{AURORA_FIFO_PROFILE_DRAW};
+   draw_prim(prim, fmt, reader.read<u16>(), reader);
+ }
+ 
+ void handle_aurora(ByteReader& reader) noexcept {
+   ZoneScoped;
+   const u16 subCmd = reader.read<u16>();
++  const bool isDraw = subCmd == GX_AURORA_DRAW_SIZED || subCmd == GX_AURORA_DRAW_INDEXED;
++  profile::Scope prof{isDraw ? AURORA_FIFO_PROFILE_DRAW : AURORA_FIFO_PROFILE_AURORA};
+ 
+   if (subCmd == GX_AURORA_LOAD_VIEWPORT_RENDER) {
+     const f32 left = reader.read<f32>();
+@@ -700,6 +1138,33 @@ void handle_aurora(ByteReader& reader) noexcept {
+     g_gxState.texCopyDstWide = true;
+   } else if (subCmd == GX_AURORA_LOAD_COPY_DEST) {
+     g_gxState.texCopyDest = reinterpret_cast<const void*>(reader.read<u64>());
++  } else if (subCmd == GX_AURORA_REQUEST_DEPTH_SNAPSHOT) {
++    gfx::depth_peek::request_snapshot();
++  } else if (subCmd == GX_AURORA_SET_CONTENT_SCALE) {
++    // native/patches/aurora/0009: the following drawing maps to the top-left part of the EFB.
++    gfx::set_content_scale(reader.read<f32>());
++    set_logical_viewport(g_gxState.logicalViewport);
++    set_logical_scissor(g_gxState.logicalScissor);
++  } else if (subCmd == GX_AURORA_SET_VIEW_DELTA) {
++    // native/patches/aurora/0019: applied when the uniform is built (shader_info.cpp fill_uniform).
++    auto& vd = g_gxState.viewDelta;
++    const bool active = reader.read<u8>() != 0;
++    if (active) {
++      f32* flat = reinterpret_cast<f32*>(&vd.delta);
++      for (int i = 0; i < 12; ++i) {
++        flat[i] = reader.read<f32>();
++      }
++      for (auto& v : vd.projFrom) {
++        v = reader.read<f32>();
++      }
++      for (auto& v : vd.projTo) {
++        v = reader.read<f32>();
++      }
++    }
++    if (active || vd.active) {
++      g_gxState.dirty |= DirtyUniform;
++    }
++    vd.active = active;
+   } else if (subCmd == GX_AURORA_READBACK_CAPTURE_PEEKS) {
+     readback::handle_capture_peeks(reader);
+   } else if (subCmd == GX_AURORA_READBACK_CAPTURE_COPIES) {
+@@ -774,7 +1239,17 @@ void handle_aurora(ByteReader& reader) noexcept {
+   }
+ }
+ 
++void set_fast_paths(bool enabled) noexcept { sFastPaths = enabled; }
++
+ void clear_draw_cache() noexcept {
++  if (++sPipelineMemoFrame % 600 == 0 && sPipelineMemo.size() > 4096) {
++    sPipelineMemo.clear(); // states of scenes gone
++  }
++  // the memo's texture handles are kept only for their frame
++  for (auto it = sBindMemo.begin(); it != sBindMemo.end();) {
++    it = it->second.frame + 1 < sPipelineMemoFrame ? sBindMemo.erase(it) : std::next(it);
++  }
++  g_gxState.viewDelta.active = false; // native/patches/aurora/0019: never past a frame
+   sDrawCache.bindGeneration = 0;
+   sDrawCache.uniformRange = {};
+   sDrawCache.fogRange = {};
+diff --git a/lib/gx/command_processor.hpp b/lib/gx/command_processor.hpp
+index fb9fe15316d524381657e821b296f189d47320fa..feb4ae1ea87d943ab99ac304467804a2599194a5 100644
+--- a/lib/gx/command_processor.hpp
++++ b/lib/gx/command_processor.hpp
+@@ -14,5 +14,7 @@ struct ProcessResult {
+ // Process GX FIFO commands until the next draw done event or end of buffer
+ ProcessResult process(const uint8_t* data, uint32_t size) noexcept;
+ void clear_draw_cache() noexcept;
++// SwitchWaker patch 0021: the translation's fast paths (on by default), switchable for A/B checks.
++void set_fast_paths(bool enabled) noexcept;
+ 
+ } // namespace aurora::gx::fifo
+diff --git a/lib/gx/fifo.cpp b/lib/gx/fifo.cpp
+index 3c62a6d316e114eee672c718566ae90d106ed66a..77abe94258272f8f68d5110e308748be5db8ead2 100644
+--- a/lib/gx/fifo.cpp
++++ b/lib/gx/fifo.cpp
+@@ -1,13 +1,17 @@
+ #include "fifo.hpp"
+ 
+ #include "../thread.hpp"
++#include "../gfx/render_worker.hpp"
+ #include "command_processor.hpp"
++#include "fifo_profile.hpp"
+ 
+ #include <algorithm>
+ #include <atomic>
+ #include <cstring>
++#include <deque>
+ #include <limits>
+ #include <mutex>
++#include <thread>
+ 
+ #include <tracy/Tracy.hpp>
+ 
+@@ -37,6 +41,29 @@ std::atomic<uint32_t> sWorkerWake{0};
+ thread::Thread sWorkerThread;
+ std::atomic<DrawDoneCallback> sDrawDoneCallback{nullptr};
+ 
++// Async end of frame (patch 0018). Frame jobs run on the worker once it has processed the command stream
++// up to their position (stream offsets, as sPublished/sProcessed). The game thread queues them and is the
++// only writer of the stream; the counters let it wait for them.
++struct Job {
++  uint64_t pos;
++  FrameJob fn;
++  bool frameEnd;
++};
++// More ended frames than this not yet done make end_frame_async wait: the game thread runs at most one
++// frame ahead of the worker.
++constexpr uint64_t kMaxFramesInFlight = 1;
++// A command buffer this large at an async end of frame is drained (reset): it is otherwise only reset when
++// the worker has caught up (a drain, GXDrawDone, or an end of frame finding it idle).
++constexpr uint32_t kAsyncBufferLimit = 64u << 20;
++std::atomic<bool> sAsync{false};
++std::mutex sJobMutex;
++std::deque<Job> sJobs;
++std::atomic<uint64_t> sJobsQueued{0};
++std::atomic<uint64_t> sJobsDone{0};
++std::atomic<uint64_t> sFramesEnded{0};
++std::atomic<uint64_t> sFramesDone{0};
++std::atomic<std::thread::id> sWorkerId{};
++
+ void dispatch_draw_done() noexcept {
+   if (const auto callback = sDrawDoneCallback.load(std::memory_order_acquire); callback != nullptr) {
+     callback();
+@@ -59,6 +86,7 @@ void process_to(uint64_t target, std::memory_order order) noexcept {
+                     sStreamBase + detail::sBufferSize);
+       const auto start = static_cast<uint32_t>(processed - sStreamBase);
+       const auto size = static_cast<uint32_t>(target - processed);
++      profile::Scope prof{AURORA_FIFO_PROFILE_PROCESS};
+       result = process(detail::sBufferData + start, size);
+     }
+     AURORA_ASSERT(result.bytesProcessed > 0 && result.bytesProcessed <= target - processed,
+@@ -68,26 +96,96 @@ void process_to(uint64_t target, std::memory_order order) noexcept {
+       dispatch_draw_done();
+     }
+     processed += result.bytesProcessed;
++    profile::count(AURORA_FIFO_PROFILE_STREAM_BYTES, result.bytesProcessed);
+     sProcessed.store(processed, order);
+     sProcessed.notify_all();
+   }
+ }
+ 
++// Runs the first frame job if the stream has been processed up to its position.
++bool run_due_job(uint64_t processed) noexcept {
++  Job job;
++  {
++    std::lock_guard lock{sJobMutex};
++    if (sJobs.empty() || sJobs.front().pos > processed) {
++      return false;
++    }
++    job = std::move(sJobs.front());
++    sJobs.pop_front();
++  }
++  if (job.fn) {
++    profile::Scope prof{AURORA_FIFO_PROFILE_JOB};
++    job.fn();
++  }
++  if (job.frameEnd) {
++    sFramesDone.fetch_add(1, std::memory_order_release);
++    sFramesDone.notify_all();
++  }
++  sJobsDone.fetch_add(1, std::memory_order_release);
++  sJobsDone.notify_all();
++  return true;
++}
++
++uint64_t next_job_pos() noexcept {
++  std::lock_guard lock{sJobMutex};
++  return sJobs.empty() ? std::numeric_limits<uint64_t>::max() : sJobs.front().pos;
++}
++
++void queue_job(uint64_t pos, FrameJob fn, bool frameEnd) {
++  {
++    std::lock_guard lock{sJobMutex};
++    sJobs.push_back(Job{.pos = pos, .fn = std::move(fn), .frameEnd = frameEnd});
++  }
++  sJobsQueued.fetch_add(1, std::memory_order_release);
++}
++
++void wait_at_least(std::atomic<uint64_t>& counter, uint64_t target) noexcept {
++  uint64_t value = counter.load(std::memory_order_acquire);
++  while (value < target) {
++    counter.wait(value, std::memory_order_acquire);
++    value = counter.load(std::memory_order_acquire);
++  }
++}
++
++// Game thread: the buffer starts over once the worker has processed all of it. Never waits: the worker
++// holds sBufferMutex while it translates a published range (a whole frame when it is behind), and has
++// released it by the time sProcessed reaches the end.
++void reset_buffer_if_processed() noexcept {
++  const uint64_t end = sStreamBase + detail::sBufferSize;
++  if (sProcessed.load(std::memory_order_acquire) != end) {
++    return;
++  }
++  std::unique_lock lock{sBufferMutex, std::try_to_lock};
++  if (lock.owns_lock()) {
++    sStreamBase = end;
++    detail::sBufferSize = 0;
++  }
++}
++
+ void worker_main(std::stop_token token) noexcept {
+   std::stop_callback wakeOnStop{token, wake_worker};
++  sWorkerId.store(std::this_thread::get_id(), std::memory_order_release);
+   while (true) {
+     const uint32_t event = sWorkerWake.load(std::memory_order_acquire);
+-    const uint64_t processed = sProcessed.load(std::memory_order_relaxed);
++    // sPublished before the jobs: the game thread queues a frame's begin job before it publishes any of
++    // the frame's commands, so commands seen here never overtake a job not yet seen.
+     const uint64_t published = sPublished.load(std::memory_order_acquire);
+-    if (published != processed) {
+-      process_to(published, std::memory_order_release);
++    const uint64_t processed = sProcessed.load(std::memory_order_relaxed);
++    if (run_due_job(processed)) {
++      continue;
++    }
++    const uint64_t limit = std::min(published, next_job_pos());
++    if (limit > processed) {
++      process_to(limit, std::memory_order_release);
+       continue;
+     }
+ 
+     if (token.stop_requested()) {
+       break;
+     }
++    profile::set_idle(true);
+     sWorkerWake.wait(event, std::memory_order_acquire);
++    profile::set_idle(false);
+   }
+ }
+ 
+@@ -138,7 +236,11 @@ void init(ProcessingMode mode) {
+   start_worker();
+ }
+ 
+-void shutdown() { stop_worker(); }
++void shutdown() {
++  sync();
++  stop_worker();
++  sAsync.store(false, std::memory_order_relaxed);
++}
+ 
+ void begin_frame() noexcept { sFrameActive = true; }
+ 
+@@ -147,6 +249,66 @@ void end_frame() noexcept {
+   clear_draw_cache(); // command_processor
+ }
+ 
++bool is_worker_thread() noexcept { return sWorkerId.load(std::memory_order_acquire) == std::this_thread::get_id(); }
++
++void set_async_end_frame(bool enabled) noexcept {
++  enabled = enabled && sProcessingMode == ProcessingMode::Thread;
++  if (enabled == sAsync.load(std::memory_order_relaxed)) {
++    return;
++  }
++  sync();
++  sAsync.store(enabled, std::memory_order_release);
++  Log.info("Async end of frame {}", enabled ? "on" : "off");
++}
++
++bool async_end_frame() noexcept { return sAsync.load(std::memory_order_relaxed); }
++
++void end_frame_async(FrameJob job) {
++  ZoneScoped;
++  const uint64_t target = sStreamBase + detail::sBufferSize;
++  queue_job(
++      target,
++      [job = std::move(job)] {
++        clear_draw_cache(); // command_processor (end_frame's, on the worker)
++        job();
++      },
++      true);
++  const uint64_t ended = sFramesEnded.fetch_add(1, std::memory_order_relaxed) + 1;
++  if (target > sPublished.load(std::memory_order_relaxed)) {
++    sPublished.store(target, std::memory_order_release);
++  }
++  sPendingDraws = 0;
++  sFrameActive = false;
++  wake_worker();
++  if (ended > kMaxFramesInFlight) {
++    ZoneScopedN("Wait for frames in flight");
++    wait_at_least(sFramesDone, ended - kMaxFramesInFlight);
++  }
++  reset_buffer_if_processed();
++  if (detail::sBufferSize > kAsyncBufferLimit) {
++    drain();
++  }
++}
++
++void begin_frame_async(FrameJob job) {
++  // At the stream's published end: commands written since the end of the last frame (outside a frame,
++  // unpublished) are processed after it, in this frame, as in the synchronous path.
++  queue_job(sPublished.load(std::memory_order_relaxed), std::move(job), false);
++  wake_worker();
++}
++
++void sync() noexcept {
++  if (!sWorkerThread.joinable() || is_worker_thread() || gfx::render_worker::is_worker_thread()) {
++    return;
++  }
++  const uint64_t queued = sJobsQueued.load(std::memory_order_acquire);
++  if (sJobsDone.load(std::memory_order_acquire) >= queued) {
++    return;
++  }
++  ZoneScoped;
++  wait_at_least(sJobsDone, queued);
++}
++
+ void write_data_grow(const void* data, uint32_t length) {
+   const uint64_t needed64 = static_cast<uint64_t>(detail::sBufferSize) + length;
+   AURORA_ASSERT(needed64 <= std::numeric_limits<uint32_t>::max(), "fifo::write_data: buffer size overflow");
+diff --git a/lib/gx/fifo.hpp b/lib/gx/fifo.hpp
+index c7a319a98f026fb8f8bdb1e86c8f7695da2e8488..f258e486a372b3b43442c6a2e722d6ed2df81149 100644
+--- a/lib/gx/fifo.hpp
++++ b/lib/gx/fifo.hpp
+@@ -3,6 +3,7 @@
+ #include "../internal.hpp"
+ 
+ #include <cstring>
++#include <functional>
+ 
+ namespace aurora::gx::fifo {
+ 
+@@ -32,6 +33,26 @@ void shutdown();
+ void begin_frame() noexcept;
+ void end_frame() noexcept;
+ 
++// Asynchronous end of frame (SwitchWaker patch 0018), Thread mode only, off by default. aurora::end_frame
++// then does not wait for the worker to drain the frame: end_frame_async publishes it and queues `job` (the
++// frame's texture, recording and present work) for the worker to run once it has processed the frame's
++// commands; begin_frame_async queues the next frame's gfx::begin_frame right behind it. The game thread
++// goes on with the next frame while the worker still translates this one; end_frame_async waits only
++// while more than one ended frame is not yet done. Frames stay strictly ordered: the worker runs the jobs
++// at their positions in the command stream.
++using FrameJob = std::function<void()>;
++// Between frames (game thread): waits for the queued frames first (sync).
++void set_async_end_frame(bool enabled) noexcept;
++bool async_end_frame() noexcept;
++void end_frame_async(FrameJob job);
++void begin_frame_async(FrameJob job);
++// Waits until the worker has run every queued frame job (and so processed the commands before it): what
++// the synchronous end of frame guaranteed (copy textures, the frame queued to the render worker). A no-op
++// on the FIFO worker and on the render worker (the waits are for them; release_surface runs there too)
++// and without frame jobs pending, so the synchronous path never waits here.
++void sync() noexcept;
++bool is_worker_thread() noexcept;
++
+ // Out-of-line slow path: grows internal buffer then appends data
+ void write_data_grow(const void* data, uint32_t length);
+ 
+diff --git a/lib/gx/fifo_profile.hpp b/lib/gx/fifo_profile.hpp
+new file mode 100644
+index 0000000000000000000000000000000000000000..fbd69cd9db74fbaa80d776c78fafc199ff18c254
+--- /dev/null
++++ b/lib/gx/fifo_profile.hpp
+@@ -0,0 +1,93 @@
++#pragma once
++
++// GX FIFO worker profile (SwitchWaker patch 0020): where the worker's time goes while it translates the
++// stream, for aurora_fifo_profile_get. A sampling profile: the worker stores what it is doing (a category,
++// one relaxed byte store per scope) and a sampler thread counts the category it finds every 250 us, so
++// the worker is barely slowed down (per-scope clock reads tripled its time on the Mac). Counts and byte
++// totals are plain relaxed adds. Everything is off (no sampler thread, no stores) until
++// aurora_fifo_profile_enable(true).
++
++#include <aurora/aurora.h>
++
++#include <atomic>
++#include <chrono>
++#include <cstdint>
++#include <mutex>
++#include <thread>
++
++namespace aurora::gx::fifo::profile {
++inline std::atomic<bool> g_enabled{false};
++inline std::atomic<uint8_t> g_category{AURORA_FIFO_PROFILE_IDLE};
++inline std::atomic<uint64_t> g_values[AURORA_FIFO_PROFILE_COUNT]{};
++
++inline bool enabled() noexcept { return g_enabled.load(std::memory_order_relaxed); }
++
++inline void add(AuroraFifoProfileValue which, uint64_t value) noexcept {
++  g_values[which].fetch_add(value, std::memory_order_relaxed);
++}
++
++inline void count(AuroraFifoProfileValue which, uint64_t n = 1) noexcept {
++  if (enabled()) {
++    add(which, n);
++  }
++}
++
++// Marks the translating thread as doing `which` (a category < AURORA_FIFO_PROFILE_CATEGORIES) until the
++// scope ends, then as doing what it did before.
++class Scope {
++public:
++  explicit Scope(AuroraFifoProfileValue which) noexcept {
++    if (enabled()) {
++      // one writer (the translating thread): a plain load and store, no atomic read-modify-write
++      m_prev = g_category.load(std::memory_order_relaxed);
++      g_category.store(static_cast<uint8_t>(which), std::memory_order_relaxed);
++      m_active = true;
++    }
++  }
++  ~Scope() {
++    if (m_active) {
++      g_category.store(m_prev, std::memory_order_relaxed);
++    }
++  }
++  Scope(const Scope&) = delete;
++  Scope& operator=(const Scope&) = delete;
++
++private:
++  uint8_t m_prev = 0;
++  bool m_active = false;
++};
++
++inline void set_idle(bool idle) noexcept {
++  if (enabled()) {
++    g_category.store(idle ? AURORA_FIFO_PROFILE_IDLE : AURORA_FIFO_PROFILE_PROCESS, std::memory_order_relaxed);
++  }
++}
++
++// The sampler thread, started on the first enable (never stopped: it sleeps while the profile is off).
++inline void start_sampler() {
++  static std::once_flag once;
++  std::call_once(once, [] {
++    std::thread([] {
++      using namespace std::chrono;
++      auto last = steady_clock::now();
++      while (true) {
++        std::this_thread::sleep_for(microseconds(250));
++        const auto now = steady_clock::now();
++        if (!enabled()) {
++          last = now;
++          std::this_thread::sleep_for(milliseconds(50));
++          continue;
++        }
++        // Weighted by the real interval (the sleep is often longer than asked): ns per category.
++        const auto ns = static_cast<uint64_t>(duration_cast<nanoseconds>(now - last).count());
++        last = now;
++        const uint8_t category = g_category.load(std::memory_order_relaxed);
++        if (category < AURORA_FIFO_PROFILE_CATEGORIES) {
++          add(static_cast<AuroraFifoProfileValue>(category), ns);
++        }
++        add(AURORA_FIFO_PROFILE_SAMPLES, 1);
++      }
++    }).detach();
++  });
++}
++} // namespace aurora::gx::fifo::profile
+diff --git a/lib/gx/gx.hpp b/lib/gx/gx.hpp
+index 77a821da191d4f17d18fb6ec72f7d854cea8d223..ee87f18154ba9cbee8c36e7ec7577dad96d08616 100644
+--- a/lib/gx/gx.hpp
++++ b/lib/gx/gx.hpp
+@@ -305,6 +305,14 @@ inline bool operator==(const AttrArray& lhs, const AttrArray& rhs) {
+ }
+ inline bool operator!=(const AttrArray& lhs, const AttrArray& rhs) { return !(lhs == rhs); }
+ 
++// GX_AURORA_SET_VIEW_DELTA (native/patches/aurora/0019): see GXAurora.h.
++struct ViewDelta {
++  bool active = false;
++  Mat3x4<float> delta;            // C, row-major
++  std::array<float, 6> projFrom{}; // the world view's projection (GXSetProjection encoding)
++  std::array<float, 6> projTo{};   // the projection drawn instead
++};
++
+ struct GXState {
+   struct CopyTextureKey {
+     const void* dest = nullptr;
+@@ -334,6 +342,7 @@ struct GXState {
+   };
+ 
+   // Decoded state
++  ViewDelta viewDelta; // native/patches/aurora/0019
+   std::array<PnMtx, MaxPnMtx> pnMtx;
+   u32 currentPnMtx;
+   Mat4x4<float> proj;
+@@ -443,6 +452,11 @@ void set_viewport_policy(AuroraViewportPolicy policy) noexcept;
+ void clear_static_texture_cache() noexcept;
+ void clear_copy_texture_cache() noexcept;
+ void evict_copy_texture(const void* dest) noexcept;
++// The copy texture GXCopyTex made for dest (null without one). For code compiled outside Aurora
++// (SwitchWaker patch 0017): GXState's layout depends on the compiler (math.hpp's Vec4 and Mat4x4 use
++// GCC's vector extensions, 16-byte aligned, and plain arrays under clang), so a unit built by
++// another compiler than Aurora's must not read g_gxState's fields itself.
++gfx::TextureHandle find_copy_texture(const void* dest) noexcept;
+ void evict_texture_object(u32 texObjId) noexcept;
+ void evict_tlut_object(u32 tlutObjId) noexcept;
+ Vec2<uint32_t> logical_fb_size() noexcept;
+diff --git a/lib/gx/regs.cpp b/lib/gx/regs.cpp
+index a059918bd704e582210b04139bc6b26c5b97ab9b..2e66967b1082ac24f6b88a5ad99969b995087d8e 100644
+--- a/lib/gx/regs.cpp
++++ b/lib/gx/regs.cpp
+@@ -956,6 +956,15 @@ bool store_xf_f32(f32& dst, u32 bits) noexcept {
+ 
+ } // namespace
+ 
++// SwitchWaker patch 0021: kBpRegs' alwaysHandle flags, for bp_redundant (regs.hpp).
++const std::array<bool, 0x100> g_bpAlwaysHandle = [] {
++  std::array<bool, 0x100> flags{};
++  for (u32 i = 0; i < 0x100; ++i) {
++    flags[i] = kBpRegs[i].alwaysHandle;
++  }
++  return flags;
++}();
++
+ // Dispatch
+ 
+ void handle_bp(u32 value) noexcept {
+diff --git a/lib/gx/regs.hpp b/lib/gx/regs.hpp
+index ccdff0a7993d1bc8205a0f2a99a801fecd023082..6937e441453a78b090d5c2ac46580d3dc197c97b 100644
+--- a/lib/gx/regs.hpp
++++ b/lib/gx/regs.hpp
+@@ -2,6 +2,7 @@
+ 
+ #include "gx.hpp"
+ 
++#include <array>
+ #include <bit>
+ #include <cstring>
+ #include <span>
+@@ -13,6 +14,17 @@ constexpr u32 reg_get(const u32 reg, const u32 size, const u32 shift) noexcept {
+ }
+ 
+ void handle_bp(u32 value) noexcept;
++
++// SwitchWaker patch 0021: true when handle_bp(value) would return at once (the register already holds
++// the value, no BP mask pending, no side effects): most BP loads in a frame (display lists send their
++// materials' whole state), skipped by the command processor without the call.
++extern const std::array<bool, 0x100> g_bpAlwaysHandle;
++inline bool bp_redundant(u32 value) noexcept {
++  const u32 regId = value >> 24;
++  const auto& state = g_gxState;
++  return regId != 0xFE && state.bpRegCache[0xFE] == 0x00FFFFFF && state.bpRegValid.test(regId) &&
++         state.bpRegCache[regId] == value && !g_bpAlwaysHandle[regId];
++}
+ void handle_cp(u8 addr, u32 value) noexcept;
+ void handle_xf(u16 addr, std::span<const u8> data) noexcept;
+ 
+diff --git a/lib/gx/shader_info.cpp b/lib/gx/shader_info.cpp
+index 74614a7822f62fc4ce3a4e953eefd283a98c65ac..eab7efc8cc9f36911132de7ad24e0773e7db5701 100644
+--- a/lib/gx/shader_info.cpp
++++ b/lib/gx/shader_info.cpp
+@@ -216,6 +216,28 @@ u32 line_texcoord_mask() noexcept {
+ }
+ } // namespace
+ 
++// A stage may name a texture coordinate past the texgens set up (GXSetNumTexGens): the hardware then
++// reads texture coordinate 0 (Dolphin, PixelShaderGen.cpp, "tex coord 0 is used"). The shader
++// generator has no source for such a coordinate and aborts ("unhandled tcg src"), so stages are
++// pointed at GX_TEXCOORD0 here, as the hardware does. Wind Waker's frozen Mothula samples
++// GX_TEXCOORD2 with two texgens. With no texgen at all there is nothing to fall back to.
++void resolve_ungenerated_texcoords(ShaderConfig& config) noexcept {
++  if (config.tcgs[0].src == GX_MAX_TEXGENSRC) {
++    return;
++  }
++  const auto resolve = [&](GXTexCoordID& id) {
++    if (id != GX_TEXCOORD_NULL && (id >= MaxTexCoord || config.tcgs[id].src == GX_MAX_TEXGENSRC)) {
++      id = GX_TEXCOORD0;
++    }
++  };
++  for (u32 i = 0; i < config.tevStageCount && i < MaxTevStages; ++i) {
++    resolve(config.tevStages[i].texCoordId);
++  }
++  for (u32 i = 0; i < config.numIndStages && i < MaxIndStages; ++i) {
++    resolve(config.indStages[i].texCoordId);
++  }
++}
++
+ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
+   ZoneScoped;
+ 
+@@ -306,6 +328,7 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
+       info.sampledTexCoords.set(tcg.embossSrc);
+       info.lightingEnabled = true;
+     }
++
+   }
+ 
+   // Texgens can consume a color channel even when TEV never reads it directly.
+@@ -387,6 +410,46 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
+   return info;
+ }
+ 
++// GX_AURORA_SET_VIEW_DELTA (native/patches/aurora/0019): on, and the draw uses the perspective
++// projection it names (the world view's), so the view moves by the delta for this draw.
++static bool view_delta_applies() noexcept {
++  const auto& vd = g_gxState.viewDelta;
++  if (!vd.active) {
++    return false;
++  }
++  const auto& p = g_gxState.proj;
++  if (p.m3[2] != -1.f || p.m3[3] != 0.f) {
++    return false; // orthographic
++  }
++  return p.m0[0] == vd.projFrom[0] && p.m0[2] == vd.projFrom[1] && p.m1[1] == vd.projFrom[2] &&
++         p.m1[2] == vd.projFrom[3] && p.m2[2] == vd.projFrom[4] && p.m2[3] == vd.projFrom[5];
++}
++
++// d = C * m for row-major 3x4 affine matrices; withTranslation false: C's rotation only (normals).
++static Mat3x4<float> view_delta_mul(const Mat3x4<float>& c, const Mat3x4<float>& m, bool withTranslation) noexcept {
++  const Vec4<float>* cr[3] = {&c.m0, &c.m1, &c.m2};
++  const Vec4<float>* mr[3] = {&m.m0, &m.m1, &m.m2};
++  Mat3x4<float> d;
++  Vec4<float>* dr[3] = {&d.m0, &d.m1, &d.m2};
++  for (int i = 0; i < 3; ++i) {
++    const Vec4<float>& ci = *cr[i];
++    for (int j = 0; j < 4; ++j) {
++      (*dr[i])[j] = ci[0] * (*mr[0])[j] + ci[1] * (*mr[1])[j] + ci[2] * (*mr[2])[j];
++    }
++    if (withTranslation) {
++      (*dr[i])[3] += ci[3];
++    }
++  }
++  return d;
++}
++
++static Vec4<float> view_delta_vec(const Mat3x4<float>& c, const Vec4<float>& v, bool point) noexcept {
++  const f32 w = point ? 1.f : 0.f;
++  return Vec4<float>{c.m0[0] * v[0] + c.m0[1] * v[1] + c.m0[2] * v[2] + c.m0[3] * w,
++                     c.m1[0] * v[0] + c.m1[1] * v[1] + c.m1[2] * v[2] + c.m1[3] * w,
++                     c.m2[0] * v[0] + c.m2[1] * v[1] + c.m2[2] * v[2] + c.m2[3] * w, v[3]};
++}
++
+ static bool stage_samples_texture(const TevStage& stage) noexcept {
+   if (stage.texMapId == GX_TEXMAP_NULL) {
+     return false;
+@@ -457,6 +520,7 @@ void validate_shader_config(const ShaderConfig& config, const ShaderInfo& info,
+ 
+ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+   buf.reserve_extra(info.uniformSize);
++  const bool viewDelta = view_delta_applies();
+ 
+   buf.append<f32>(g_gxState.renderViewport.width);
+   buf.append<f32>(g_gxState.renderViewport.height);
+@@ -476,6 +540,16 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+     }
+   }
+   auto proj = g_gxState.proj;
++  if (viewDelta) {
++    // the world view's projection swapped (xf_load_projection's perspective layout)
++    const auto& to = g_gxState.viewDelta.projTo;
++    proj.m0[0] = to[0];
++    proj.m0[2] = to[1];
++    proj.m1[1] = to[2];
++    proj.m1[2] = to[3];
++    proj.m2[2] = to[4];
++    proj.m2[3] = to[5];
++  }
+   if constexpr (UseReversedZ) {
+     proj.m2 = proj.m2 * Vec4{-1.f, -1.f, -1.f, -1.f};
+   } else {
+@@ -483,8 +557,13 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+   }
+   buf.append(proj);
+ 
++  const auto& delta = g_gxState.viewDelta.delta;
+   for (int i = 0; i < MaxPnMtx; i++) {
+-    buf.append(g_gxState.pnMtx[i].pos);
++    if (viewDelta) {
++      buf.append(view_delta_mul(delta, g_gxState.pnMtx[i].pos, true));
++    } else {
++      buf.append(g_gxState.pnMtx[i].pos);
++    }
+   }
+ 
+   for (int i = 0; i < MaxTexMtx; i++) {
+@@ -492,7 +571,11 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+   }
+ 
+   for (int i = 0; i < MaxPnMtx; i++) {
+-    buf.append(g_gxState.pnMtx[i].nrm);
++    if (viewDelta) {
++      buf.append(view_delta_mul(delta, g_gxState.pnMtx[i].nrm, false));
++    } else {
++      buf.append(g_gxState.pnMtx[i].nrm);
++    }
+   }
+ 
+   for (int i = 0; i < info.loadsTevReg.size(); ++i) {
+@@ -503,7 +586,17 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
+   if (info.lightingEnabled) {
+     // Lights
+     static_assert(sizeof(g_gxState.lights) == 80 * GX::MaxLights);
+-    buf.append(g_gxState.lights);
++    if (viewDelta) {
++      // lights are given in view space: they move with the view
++      auto lights = g_gxState.lights;
++      for (auto& light : lights) {
++        light.pos = view_delta_vec(delta, light.pos, true);
++        light.dir = view_delta_vec(delta, light.dir, false);
++      }
++      buf.append(lights);
++    } else {
++      buf.append(g_gxState.lights);
++    }
+     // Light state for all channels
+     for (int i = 0; i < 4; ++i) {
+       buf.append<u32>(g_gxState.colorChannelState[i].lightMask.to_ulong());
+diff --git a/lib/gx/shader_info.hpp b/lib/gx/shader_info.hpp
+index 7cc9726b293d2ba7b73b9c298ccee0daaffb1eec..74a3557dcf3f2e0d9a0d7ff9bb2cfdc37aa185d4 100644
+--- a/lib/gx/shader_info.hpp
++++ b/lib/gx/shader_info.hpp
+@@ -4,6 +4,8 @@
+ 
+ namespace aurora::gx {
+ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept;
++// Points TEV and indirect stages that name a texture coordinate no texgen produces at GX_TEXCOORD0.
++void resolve_ungenerated_texcoords(ShaderConfig& config) noexcept;
+ void validate_shader_config(const ShaderConfig& config, const ShaderInfo& info, u32 numTexGens) noexcept;
+ gfx::Range build_uniform(const ShaderInfo& info) noexcept;
+ u8 color_channel(GXChannelID id) noexcept;
+diff --git a/lib/gx/texture.cpp b/lib/gx/texture.cpp
+index 33a8c9911502858d535dd250ea49c2d0b3ac8fe7..e1c433ebad47c4c6c2c89e3946463c6b242bbd53 100644
+--- a/lib/gx/texture.cpp
++++ b/lib/gx/texture.cpp
+@@ -15,6 +15,7 @@
+ 
+ #include <algorithm>
+ #include <atomic>
++#include <chrono>
+ #include <cstddef>
+ #include <cstdint>
+ #include <cstring>
+@@ -48,10 +49,18 @@ struct DynamicPaletteEntry {
+ struct CachedTextureEntry {
+   gfx::TextureHandle handle;
+   u32 texDataVersion = 0;
++  // What the texture object described when it was resolved (patch 0012): a display list can
++  // rewrite a loaded texture's size and format registers after GXLoadTexObj, so one texObjId
++  // may be drawn as different images.
++  u32 width = 0;
++  u32 height = 0;
++  u32 format = 0;
++  u32 mipCount = 0;
+   u32 tlutObjId = 0;
+   u32 tlutDataVersion = 0;
+   uint64_t replacementId = 0;
+   uint64_t lastUsedFrame = 0;
++  uint64_t scanGeneration = 0; // s_scanGeneration when stored (gradual rescan, patch 0011)
+ };
+ 
+ struct CachedTlutTextureEntry {
+@@ -130,6 +139,56 @@ uint64_t s_bindGeneration = 1;
+ std::atomic<uint64_t> s_pendingInvalidations = 0;
+ std::atomic<uint64_t> s_pendingCacheClears = 0;
+ 
++// Gradual rescan (cos_native patch 0011). An entry stored before s_rescanAllBefore (any) or
++// s_rescanReplacementsBefore (one using a replacement) is stale: still used, but looked up again
++// when bound while this frame's budget lasts. Bindings are re-resolved every frame while stale
++// entries keep turning up.
++std::atomic<bool> s_pendingRescanAll = false;
++std::atomic<bool> s_pendingRescanReplacements = false;
++std::atomic<uint64_t> s_rescanBudgetBytes = 0;
++uint64_t s_scanGeneration = 1;
++uint64_t s_rescanAllBefore = 0;
++uint64_t s_rescanReplacementsBefore = 0;
++uint64_t s_rescanRemaining = 0;
++uint64_t s_rescanStaleSeen = 0;
++uint32_t s_rescanQuietFrames = 0;
++bool s_rescanActive = false;
++// Resolve statistics (aurora::texture::resolve_stats).
++uint64_t s_hashNsFrame = 0;
++std::atomic<uint64_t> s_hashNsTotal = 0;
++std::atomic<uint64_t> s_hashNsMaxFrame = 0;
++std::atomic<uint64_t> s_hashedBytesTotal = 0;
++std::atomic<uint64_t> s_rescanned = 0;
++std::atomic<uint64_t> s_rescanFrames = 0;
++std::atomic<bool> s_rescanActivePublic = false;
++
++// Patch 0012: a cached entry only stands for the object if it was resolved with the same size,
++// format and mip count. Before, the first interpretation of a texObjId was returned for every
++// later one (bug B9: J3D material display lists with another model's image registers), so what
++// an NPC showed depended on which variant was drawn first.
++uint32_t s_imageMismatchLogs = 0;
++bool same_image(const CachedTextureEntry& entry, const GXTexObj_& obj) noexcept {
++  if (entry.width == obj.width() && entry.height == obj.height() && entry.format == obj.format() &&
++      entry.mipCount == obj.mip_count()) {
++    return true;
++  }
++  if (s_imageMismatchLogs < 16) {
++    ++s_imageMismatchLogs;
++    Log.warn("texture object {} resolved again as {}x{} format {} mips {} (cached {}x{} format {} mips {})",
++             obj.texObjId, obj.width(), obj.height(), obj.format(), obj.mip_count(), entry.width, entry.height,
++             entry.format, entry.mipCount);
++  }
++  return false;
++}
++
++bool entry_stale(const CachedTextureEntry& entry) noexcept {
++  return entry.scanGeneration < s_rescanAllBefore ||
++         (entry.replacementId != 0 && entry.scanGeneration < s_rescanReplacementsBefore);
++}
++
++// A stale entry found while binding: true if it is to be looked up again now (budget left).
++bool take_rescan(const GXTexObj_& obj) noexcept;
++
+ #if DEBUG
+ constexpr bool BuildSourceKeyForDebug = true;
+ #else
+@@ -152,7 +211,21 @@ void apply_pending_invalidations() noexcept {
+   if (pendingCacheClears != 0) {
+     do_clear_static_texture_cache();
+   }
+-  s_bindGeneration += pendingCacheClears + pendingInvalidations;
++  uint64_t rescans = 0;
++  if (s_pendingRescanAll.exchange(false, std::memory_order_acq_rel)) {
++    s_rescanAllBefore = ++s_scanGeneration;
++    ++rescans;
++  }
++  if (s_pendingRescanReplacements.exchange(false, std::memory_order_acq_rel)) {
++    s_rescanReplacementsBefore = ++s_scanGeneration;
++    ++rescans;
++  }
++  if (rescans != 0) {
++    s_rescanActive = true;
++    s_rescanQuietFrames = 0;
++    s_rescanActivePublic.store(true, std::memory_order_relaxed);
++  }
++  s_bindGeneration += pendingCacheClears + pendingInvalidations + rescans;
+   if (s_bindGeneration == 0) {
+     s_bindGeneration = 1;
+   }
+@@ -207,10 +280,15 @@ void store_cached_texture(const GXTexObj_& obj, gfx::TextureHandle handle, u32 t
+ 
+   entry.handle = std::move(handle);
+   entry.texDataVersion = obj.texDataVersion;
++  entry.width = obj.width();
++  entry.height = obj.height();
++  entry.format = obj.format();
++  entry.mipCount = obj.mip_count();
+   entry.tlutObjId = tlutObjId;
+   entry.tlutDataVersion = tlutDataVersion;
+   entry.replacementId = replacementId;
+   entry.lastUsedFrame = s_frameCount;
++  entry.scanGeneration = s_scanGeneration;
+ 
+   if (tlutObjId != 0) {
+     auto& cache = s_tlutObjectCaches[tlutObjId];
+@@ -267,7 +345,19 @@ struct TextureKeys {
+   std::optional<aurora::texture::TextureSourceKey> sourceKey;
+ };
+ 
++TextureKeys hash_texture_source_impl(const GXTexObj_& obj, const GXTlutObj_* tlut, bool buildSourceKey);
++
+ TextureKeys hash_texture_source(const GXTexObj_& obj, const GXTlutObj_* tlut, bool buildSourceKey) {
++  const auto start = std::chrono::steady_clock::now();
++  const uint64_t hashedBefore = s_stats.hashedBytes;
++  auto keys = hash_texture_source_impl(obj, tlut, buildSourceKey);
++  s_hashNsFrame += static_cast<uint64_t>(
++      std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count());
++  s_hashedBytesTotal.fetch_add(s_stats.hashedBytes - hashedBefore, std::memory_order_relaxed);
++  return keys;
++}
++
++TextureKeys hash_texture_source_impl(const GXTexObj_& obj, const GXTlutObj_* tlut, bool buildSourceKey) {
+   ZoneScoped;
+   const size_t textureBytes = texture::texture_source_size(obj.format(), obj.width(), obj.height(), obj.mip_count());
+   CHECK(obj.has_data() && textureBytes != 0, "invalid texture source for content hash");
+@@ -499,6 +589,19 @@ bool use_replacement(std::optional<gfx::texture_replacement::ReplacementResult>
+   }
+   return true;
+ }
++bool take_rescan(const GXTexObj_& obj) noexcept {
++  ++s_rescanStaleSeen;
++  const uint64_t budget = s_rescanBudgetBytes.load(std::memory_order_relaxed);
++  if (budget != 0) {
++    if (s_rescanRemaining == 0) {
++      return false;
++    }
++    const uint64_t bytes = texture::texture_source_size(obj.format(), obj.width(), obj.height(), obj.mip_count());
++    s_rescanRemaining -= std::min(s_rescanRemaining, std::max<uint64_t>(bytes, 1));
++  }
++  s_rescanned.fetch_add(1, std::memory_order_relaxed);
++  return true;
++}
+ } // namespace
+ 
+ const TextureStats& texture_stats() noexcept { return s_stats; }
+@@ -605,13 +708,30 @@ void invalidate_replacement(uint64_t replacementId) noexcept {
+   }
+ }
+ 
++uint64_t frame_count() noexcept { return s_frameCount; }
++
++uint64_t replacement_last_used_frame(uint64_t replacementId) noexcept {
++  const auto users = s_replacementUsers.find(replacementId);
++  if (users == s_replacementUsers.end()) {
++    return 0;
++  }
++  uint64_t last = 0;
++  for (const u32 texObjId : users->second) {
++    if (const auto it = s_textureObjectCaches.find(texObjId); it != s_textureObjectCaches.end()) {
++      last = std::max(last, it->second.lastUsedFrame);
++    }
++  }
++  return last;
++}
++
+ gfx::TextureHandle resolve_static_texture(const GXTexObj_& obj) {
+   ZoneScoped;
+ 
+   if (obj.texObjId != 0) {
+     if (const auto it = s_textureObjectCaches.find(obj.texObjId); it != s_textureObjectCaches.end()) {
+       auto& entry = it->second;
+-      if (entry.handle && entry.texDataVersion == obj.texDataVersion && entry.tlutObjId == 0) {
++      if (entry.handle && entry.texDataVersion == obj.texDataVersion && entry.tlutObjId == 0 &&
++          same_image(entry, obj) && (!entry_stale(entry) || !take_rescan(obj))) {
+         entry.lastUsedFrame = s_frameCount;
+         ++s_stats.objectHits;
+         return entry.handle;
+@@ -662,7 +782,7 @@ gfx::TextureHandle resolve_static_palette_texture(const GXTexObj_& obj, const GX
+     if (const auto it = s_textureObjectCaches.find(obj.texObjId); it != s_textureObjectCaches.end()) {
+       auto& entry = it->second;
+       if (entry.handle && entry.texDataVersion == obj.texDataVersion && entry.tlutObjId == tlut.tlutObjId &&
+-          entry.tlutDataVersion == tlut.tlutDataVersion) {
++          entry.tlutDataVersion == tlut.tlutDataVersion && same_image(entry, obj) && (!entry_stale(entry) || !take_rescan(obj))) {
+         entry.lastUsedFrame = s_frameCount;
+         if (auto tlutIt = s_tlutObjectCaches.find(tlut.tlutObjId); tlutIt != s_tlutObjectCaches.end()) {
+           tlutIt->second.lastUsedFrame = s_frameCount;
+@@ -742,6 +862,35 @@ void end_frame() noexcept {
+   s_copyCache.end_frame();
+   s_contentCache.end_frame();
+   update_cache_stats();
++
++  // Gradual rescan: bindings resolve again next frame while stale entries keep turning up.
++  if (s_rescanActive) {
++    s_rescanFrames.fetch_add(1, std::memory_order_relaxed);
++    if (s_rescanStaleSeen != 0) {
++      s_rescanQuietFrames = 0;
++    } else if (++s_rescanQuietFrames >= 3) {
++      s_rescanActive = false;
++      s_rescanActivePublic.store(false, std::memory_order_relaxed);
++    }
++    if (s_rescanActive) {
++      ++s_bindGeneration;
++    }
++  }
++  s_rescanStaleSeen = 0;
++  s_rescanRemaining = s_rescanBudgetBytes.load(std::memory_order_relaxed);
++  s_hashNsTotal.fetch_add(s_hashNsFrame, std::memory_order_relaxed);
++  if (s_hashNsFrame > s_hashNsMaxFrame.load(std::memory_order_relaxed)) {
++    s_hashNsMaxFrame.store(s_hashNsFrame, std::memory_order_relaxed);
++  }
++  s_hashNsFrame = 0;
++}
++
++void request_rescan(bool replacementsOnly) noexcept {
++  (replacementsOnly ? s_pendingRescanReplacements : s_pendingRescanAll).store(true, std::memory_order_release);
++}
++
++void set_rescan_budget(uint64_t bytesPerFrame) noexcept {
++  s_rescanBudgetBytes.store(bytesPerFrame, std::memory_order_relaxed);
+ }
+ 
+ void shutdown() noexcept {
+@@ -758,6 +907,11 @@ void shutdown() noexcept {
+   s_pendingInvalidations.store(0, std::memory_order_release);
+   s_pendingCacheClears.store(0, std::memory_order_release);
+   s_stats = {};
++  s_scanGeneration = 1;
++  s_rescanAllBefore = 0;
++  s_rescanReplacementsBefore = 0;
++  s_rescanActive = false;
++  s_rescanActivePublic.store(false, std::memory_order_relaxed);
+ }
+ 
+ void set_content_cache_budget_for_testing(uint64_t bytes) noexcept {
+@@ -814,8 +968,16 @@ void clear_copy_texture_cache() noexcept {
+ 
+ void clear_static_texture_cache() noexcept { s_pendingCacheClears.fetch_add(1, std::memory_order_release); }
+ 
++gfx::TextureHandle find_copy_texture(const void* dest) noexcept {
++  const auto it = g_gxState.copyTextures.find(dest);
++  return it != g_gxState.copyTextures.end() ? it->second.handle : gfx::TextureHandle{};
++}
++
+ void evict_copy_texture(const void* dest) noexcept {
+-  g_gxState.copyTextures.erase(dest);
++  if (const auto it = g_gxState.copyTextures.find(dest); it != g_gxState.copyTextures.end()) {
++    s_copyCache.unpin(it->second.key);
++    g_gxState.copyTextures.erase(it);
++  }
+   s_copyCache.erase_if([&](const auto& key) { return key.dest == dest; });
+   update_cache_stats();
+   texture::invalidate_bindings();
+@@ -833,7 +995,10 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
+     GXTexObj_ obj = g_gxState.loadedTextures[i];
+     auto& textureBind = g_gxState.textures[i];
+     if (textureBind.generation == s_bindGeneration && obj.texObjId != 0 &&
+-        obj.texObjId == textureBind.texObj.texObjId && obj.texDataVersion == textureBind.texObj.texDataVersion) {
++        obj.texObjId == textureBind.texObj.texObjId && obj.texDataVersion == textureBind.texObj.texDataVersion &&
++        obj.image0 == textureBind.texObj.image0 && obj.mWidth == textureBind.texObj.mWidth &&
++        obj.mHeight == textureBind.texObj.mHeight && obj.mode0 == textureBind.texObj.mode0 &&
++        obj.mode1 == textureBind.texObj.mode1) {
+       touch_bound_texture(obj);
+       continue;
+     }
+@@ -864,3 +1029,24 @@ void resolve_sampled_textures(const ShaderInfo& info) noexcept {
+   }
+ }
+ } // namespace aurora::gx
++
++namespace aurora::texture {
++ResolveStats resolve_stats() noexcept {
++  return {
++      .hashNsTotal = gx::s_hashNsTotal.load(std::memory_order_relaxed),
++      .hashNsMaxFrame = gx::s_hashNsMaxFrame.load(std::memory_order_relaxed),
++      .hashedBytesTotal = gx::s_hashedBytesTotal.load(std::memory_order_relaxed),
++      .rescanned = gx::s_rescanned.load(std::memory_order_relaxed),
++      .rescanFrames = gx::s_rescanFrames.load(std::memory_order_relaxed),
++      .rescanActive = gx::s_rescanActivePublic.load(std::memory_order_relaxed),
++  };
++}
++
++void reset_resolve_stats() noexcept {
++  gx::s_hashNsTotal.store(0, std::memory_order_relaxed);
++  gx::s_hashNsMaxFrame.store(0, std::memory_order_relaxed);
++  gx::s_hashedBytesTotal.store(0, std::memory_order_relaxed);
++  gx::s_rescanned.store(0, std::memory_order_relaxed);
++  gx::s_rescanFrames.store(0, std::memory_order_relaxed);
++}
++} // namespace aurora::texture
+diff --git a/lib/gx/texture.hpp b/lib/gx/texture.hpp
+index 4e06da3648f476e656c51cbfad9f809471ff2df0..c705868ee82d5e55ed84299aab817524ccbc79a6 100644
+--- a/lib/gx/texture.hpp
++++ b/lib/gx/texture.hpp
+@@ -43,6 +43,15 @@ void invalidate_bindings() noexcept;
+ uint64_t current_bind_generation() noexcept;
+ void invalidate_replacement(uint64_t replacementId) noexcept;
+ void end_frame() noexcept;
++// Frame counter of end_frame, and the last frame a texture object using that replacement was bound
++// (0: none cached); for the replacement cache's eviction (cos_native patch 0010).
++uint64_t frame_count() noexcept;
++uint64_t replacement_last_used_frame(uint64_t replacementId) noexcept;
++// Gradual rescan (cos_native patch 0011): instead of clearing the texture-object cache, mark its
++// entries (all, or those using a replacement) stale; a stale entry stays in use and is looked up
++// again when bound, within a per-frame budget of source bytes (0: no limit). Any thread.
++void request_rescan(bool replacementsOnly) noexcept;
++void set_rescan_budget(uint64_t bytesPerFrame) noexcept;
+ void shutdown() noexcept;
+ 
+ GXState::CopyTextureRef resolve_copy_texture(const GXState::CopyTextureKey& key) noexcept;
+diff --git a/lib/internal.hpp b/lib/internal.hpp
+index d1adb6ce2e124816790f4c86e0ccc69d981ac406..e56820271b5827711d83f6b33ea56aff62a7db93 100644
+--- a/lib/internal.hpp
++++ b/lib/internal.hpp
+@@ -181,7 +181,7 @@ ALWAYS_INLINE constexpr auto underlying(T value) noexcept -> std::underlying_typ
+ namespace aurora {
+ extern AuroraConfig g_config;
+ extern uint32_t g_sdlCustomEventsStart;
+-extern char g_gameName[4];
++extern char g_gameName[5];
+ 
+ template <typename T>
+ class ArrayRef {
+diff --git a/lib/sqlite_utils.hpp b/lib/sqlite_utils.hpp
+index 38db46bbfcfbc76c8a7fbc062e8fb1086638e738..942caee1bef650e3a30ac8da8fca45ebd78806a7 100644
+--- a/lib/sqlite_utils.hpp
++++ b/lib/sqlite_utils.hpp
+@@ -4,8 +4,63 @@
+ 
+ #include <sqlite3.h>
+ 
++#include <filesystem>
++#include <string>
++#include <system_error>
++
+ namespace aurora::sqlite {
+ 
++// Sets a cache database's journal and sync settings (path: the database file).
++inline int apply_cache_pragmas(sqlite3* db, const std::string& path, Module& log) {
++  (void)path;
++  (void)log;
++  // WAL mode + NORMAL = no need for disk syncs, consistent but not durable is fine.
++  return sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
++}
++
++// After a write failed with rc: whether the cache's journal setting was changed so the write can be
++// tried once more (the Switch patch 0006 falls back from a journal file to journal_mode=MEMORY on an
++// I/O error). The failed transaction must already be over.
++inline bool journal_fallback(sqlite3* db, int rc, const std::string& path, Module& log) {
++  (void)db;
++  (void)rc;
++  (void)path;
++  (void)log;
++  return false;
++}
++
++// A result that means the file itself is damaged (a torn write, a truncated or overwritten file):
++// the cache is deleted and started again from an empty file instead of failing every statement.
++inline bool is_damaged(int rc) {
++  rc &= 0xff;
++  return rc == SQLITE_CORRUPT || rc == SQLITE_NOTADB;
++}
++
++// Whether a cache that failed to open with this result is deleted and created once more.
++inline bool reset_on_open_failure(int rc) { return is_damaged(rc); }
++
++// Removes a cache database and the files sqlite keeps next to it, so the caller can start it again
++// from an empty file. Returns the size the database had, or -1.
++inline long long reset_cache_file(const std::string& path) {
++  std::error_code ec;
++  const auto size = std::filesystem::file_size(path, ec);
++  const long long result = ec ? -1 : static_cast<long long>(size);
++  for (const char* suffix : {"", "-journal", "-wal", "-shm"}) {
++    std::filesystem::remove(path + suffix, ec);
++  }
++  return result;
++}
++
++// Logs the first few errors of a kind and then only every 1000th, so a cache that keeps failing
++// cannot flood the log. Returns whether this one is logged; `count` is the total so far.
++struct ErrorLimiter {
++  uint64_t count = 0;
++  bool next() {
++    ++count;
++    return count <= 3 || count % 1000 == 0;
++  }
++};
++
+ inline int exec(sqlite3* db, const char* sql) { return sqlite3_exec(db, sql, nullptr, nullptr, nullptr); }
+ 
+ template <typename T>
+@@ -42,7 +97,8 @@ public:
+   Transaction& operator=(Transaction&&) = delete;
+ 
+   ~Transaction() {
+-    if (!m_active) {
++    // sqlite3_get_autocommit: an I/O error or a full disk may already have rolled it back.
++    if (!m_active || sqlite3_get_autocommit(m_db)) {
+       return;
+     }
+ 
+@@ -52,18 +108,19 @@ public:
+     }
+   }
+ 
+-  void commit() {
++  int commit() {
+     if (!m_active) {
+-      return;
++      return SQLITE_OK;
+     }
+ 
+     const auto ret = sqlite3_exec(m_db, "COMMIT", nullptr, nullptr, nullptr);
+     if (ret != SQLITE_OK) {
+       m_log.error("Failed to commit transaction: {}", sqlite3_errmsg(m_db));
+-      return;
++      return ret;
+     }
+ 
+     m_active = false;
++    return SQLITE_OK;
+   }
+ 
+   explicit operator bool() const { return m_active; }
+diff --git a/lib/webgpu/gpu_cache.cpp b/lib/webgpu/gpu_cache.cpp
+index 6ef44ea339cd3dcc808de23a984fd4972f7205cd..d423641c50be5275d53a64610eae2facec503b85 100644
+--- a/lib/webgpu/gpu_cache.cpp
++++ b/lib/webgpu/gpu_cache.cpp
+@@ -25,6 +25,9 @@ static sqlite3* db;
+ static sqlite3_stmt* load_stmt;
+ static sqlite3_stmt* store_stmt;
+ static bool cache_broken;
++// Times this run deleted a damaged cache and started an empty one (cache_recover).
++static int cache_resets;
++static sqlite::ErrorLimiter cache_errors;
+ static std::mutex cache_mutex;
+ static std::vector<XXH128_hash_t> cache_keys_used;
+ #if defined(AURORA_CACHE_USE_ZSTD)
+@@ -39,43 +42,92 @@ static std::filesystem::path cache_path() {
+   return io::fs_path_from_string(g_config.cachePath) / "dawn_cache.db";
+ }
+ 
++// Finalizes the statements and closes the connection (sqlite3_close refuses while statements are
++// left, which would keep the file open).
++static void cache_close() {
++  if (load_stmt != nullptr) {
++    sqlite3_finalize(load_stmt);
++    load_stmt = nullptr;
++  }
++  if (store_stmt != nullptr) {
++    sqlite3_finalize(store_stmt);
++    store_stmt = nullptr;
++  }
++  if (db != nullptr) {
++    sqlite3_close(db);
++    db = nullptr;
++  }
++}
++
+ static void init_abort() {
+   cache_broken = true;
+-  sqlite3_close(db);
+-  db = nullptr;
++  cache_close();
+ }
+ 
+-static int check(int ret) {
+-  if (ret != SQLITE_OK) {
+-    Log.error("SQLite operation failed: {}", sqlite3_errmsg(db));
++// Resets a statement and drops its bindings when the scope ends, on every path: a statement left
++// busy after an error makes every later bind fail with SQLITE_MISUSE.
++struct StatementScope {
++  sqlite3_stmt* stmt;
++  ~StatementScope() {
++    sqlite3_reset(stmt);
++    sqlite3_clear_bindings(stmt);
++  }
++};
++
++// A transaction that rolls back unless committed, without logging (the caller reports failures
++// through cache_failed, rate-limited).
++struct CacheTransaction {
++  int rc;
++  bool active;
++  explicit CacheTransaction(const char* begin) : rc(sqlite::exec(db, begin)), active(rc == SQLITE_OK) {}
++  ~CacheTransaction() {
++    if (active) {
++      sqlite::exec(db, "ROLLBACK");
++    }
++  }
++  int commit() {
++    rc = sqlite::exec(db, "COMMIT");
++    if (rc == SQLITE_OK) {
++      active = false;
++    }
++    return rc;
+   }
++};
+ 
+-  return ret;
++// Why the last open failed, kept for one summary line (cache_init) instead of a line per step.
++static std::string cache_open_error;
++
++template <typename... T>
++static void open_error(fmt::format_string<T...> fmt, T&&... args) {
++  if (cache_open_error.empty()) {
++    cache_open_error = fmt::format(fmt, std::forward<T>(args)...);
++  }
+ }
+ 
+-static bool ensure_schema_up_to_date() {
+-  sqlite::Transaction tx(db, Log, true);
+-  if (!tx) {
+-    Log.error("Failed to open schema check transaction", sqlite3_errmsg(db));
+-    return false;
++// Returns SQLITE_OK or the error (taken before the rollback, which clears it).
++static int ensure_schema_up_to_date() {
++  CacheTransaction tx("BEGIN IMMEDIATE");
++  if (!tx.active) {
++    open_error("Failed to open schema check transaction: {}", sqlite3_errmsg(db));
++    return tx.rc;
+   }
+ 
+   auto ret = sqlite::exec(db, "CREATE TABLE IF NOT EXISTS aurora_schema(value INTEGER);");
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to create schema table: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to create schema table: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+   bool match = false;
+   auto cmd = fmt::format("SELECT * FROM aurora_schema WHERE value = {}", CACHE_SCHEMA);
+   ret = sqlite::exec(db, cmd.c_str(), [&match](int, char**, char**) { match = true; }, nullptr);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to check schema table: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to check schema table: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+   if (match) {
+-    return true;
++    return tx.commit();
+   }
+ 
+   cmd = fmt::format(
+@@ -91,52 +143,63 @@ INSERT INTO aurora_schema VALUES ({});)",
+       CACHE_SCHEMA);
+   ret = sqlite::exec(db, cmd.c_str());
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to update schema: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to update schema: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+-  tx.commit();
+-  return true;
++  ret = tx.commit();
++  if (ret != SQLITE_OK) {
++    open_error("Failed to commit the schema: {}", sqlite3_errmsg(db));
++  }
++  return ret;
+ }
+ 
+-static bool cache_init_core() {
++static int cache_init_core() {
+   Log.debug("SQLite version {}", sqlite3_libversion());
++  cache_open_error.clear();
+ 
+   std::string file = io::fs_path_to_string(cache_path());
+   Log.debug("Using dawn cache at {}", file);
+   auto ret = sqlite3_open(file.c_str(), &db);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to open database: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to open database: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+-  // WAL mode + NORMAL = no need for disk syncs, consistent but not durable is fine.
+-  ret = sqlite::exec(db, "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;");
++  ret = sqlite::apply_cache_pragmas(db, file, Log);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to set pragmas: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to set pragmas: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+-  if (!ensure_schema_up_to_date()) {
+-    Log.error("Failed to validate schema");
+-    return false;
++  ret = ensure_schema_up_to_date();
++  if (ret != SQLITE_OK) {
++    return ret;
++  }
++
++  // A cheap look at the file before using it: counts the rows through the key index (a few pages,
++  // no values read). Damage elsewhere is caught by the first statement that meets it (cache_failed).
++  ret = sqlite::exec(db, "SELECT count(*) FROM cache");
++  if (ret != SQLITE_OK) {
++    open_error("Failed to read the cache table: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+   ret = sqlite3_prepare_v3(db, "SELECT value, size, compressed FROM cache WHERE key = ?", -1, SQLITE_PREPARE_PERSISTENT,
+                            &load_stmt, nullptr);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prepare statement: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to prepare statement: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+   ret = sqlite3_prepare_v3(db, "REPLACE INTO cache (key, value, size, compressed) VALUES (?, ?, ?, ?)", -1,
+                            SQLITE_PREPARE_PERSISTENT, &store_stmt, nullptr);
+   if (ret != SQLITE_OK) {
+-    Log.error("Failed to prepare statement: {}", sqlite3_errmsg(db));
+-    return false;
++    open_error("Failed to prepare statement: {}", sqlite3_errmsg(db));
++    return ret;
+   }
+ 
+-  return true;
++  return SQLITE_OK;
+ }
+ 
+ static std::optional<uint64_t> select_uint64(const char* sql) {
+@@ -209,10 +272,28 @@ static bool cache_init() {
+     return true;
+   }
+ 
+-  if (!cache_init_core()) {
+-    Log.error("SQLite DB init failed");
++  const int ret = cache_init_core();
++  if (ret != SQLITE_OK) {
++    const auto file = io::fs_path_to_string(cache_path());
++    const std::string why = cache_open_error;
+     init_abort();
+-    return false;
++    if (!sqlite::reset_on_open_failure(ret)) {
++      Log.error("GPU cache {} could not be opened ({}); running without it", file, why);
++      return false;
++    }
++    // A damaged file: start once more from an empty one.
++    const long long oldSize = sqlite::reset_cache_file(file);
++    ++cache_resets;
++    cache_broken = false;
++    if (cache_init_core() != SQLITE_OK) {
++      Log.error("GPU cache {} could not be opened ({}); deleted it ({} bytes) but a new one failed too ({}); "
++                "running without it",
++                file, why, oldSize, cache_open_error);
++      init_abort();
++      return false;
++    }
++    Log.warn("GPU cache {} could not be opened ({}); deleted it ({} bytes) and started an empty one", file, why,
++             oldSize);
+   }
+ 
+   Log.debug("SQLite cache init succeeded");
+@@ -220,89 +301,130 @@ static bool cache_init() {
+   return true;
+ }
+ 
+-size_t load_from_cache(void const* key, size_t keySize, void* value, size_t valueSize, void*) {
+-  std::lock_guard lock(cache_mutex);
++// A statement failed. A damaged file (a write torn by a killed process, a truncated or overwritten
++// file) is reported once, deleted and replaced by an empty cache, so the run goes on caching
++// instead of failing (and logging) every lookup. Other errors are logged rate-limited. After two
++// resets in one run the cache is turned off for the rest of it.
++static void cache_failed(const char* what, int rc) {
++  if (!sqlite::is_damaged(rc)) {
++    if (cache_errors.next()) {
++      Log.error("{} failed: {} ({} cache errors so far)", what, sqlite3_errstr(rc), cache_errors.count);
++    }
++    return;
++  }
+ 
+-  if (!cache_init()) {
+-    return 0;
++  const auto file = io::fs_path_to_string(cache_path());
++  cache_close();
++  if (cache_resets >= 2) {
++    Log.error("{} failed: {}; the GPU cache was already rebuilt {} times this run, running without it", what,
++              sqlite3_errstr(rc), cache_resets);
++    cache_broken = true;
++    return;
+   }
++  ++cache_resets;
++  const long long oldSize = sqlite::reset_cache_file(file);
++  if (cache_init_core() != SQLITE_OK) {
++    init_abort();
++    Log.error("GPU cache {} is damaged ({}: {}); deleted it ({} bytes) but a new one failed ({}); running "
++              "without it",
++              file, what, sqlite3_errstr(rc), oldSize, cache_open_error);
++    return;
++  }
++  Log.warn("GPU cache {} is damaged ({}: {}); deleted it ({} bytes) and started an empty one", file, what,
++           sqlite3_errstr(rc), oldSize);
++}
+ 
+-  sqlite::Transaction tx(db, Log);
+-  if (!tx) {
+-    Log.error("Failed to open load transaction");
+-    return 0;
++// One lookup with the connection open. Returns SQLITE_OK or the error; foundSize is the stored size
++// (0 for a miss), loaded whether value was filled.
++static int load_locked(const XXH128_hash_t& keyHash, void* value, size_t valueSize, size_t& foundSize,
++                       bool& loaded) {
++  foundSize = 0;
++  loaded = false;
++  CacheTransaction tx("BEGIN");
++  if (!tx.active) {
++    return tx.rc;
+   }
+ 
+-  const auto keyHash = XXH128(key, keySize, 0);
+-  check(sqlite3_bind_blob(load_stmt, 1, &keyHash, sizeof(keyHash), SQLITE_TRANSIENT));
++  StatementScope scope{load_stmt};
++  auto ret = sqlite3_bind_blob(load_stmt, 1, &keyHash, sizeof(keyHash), SQLITE_TRANSIENT);
++  if (ret != SQLITE_OK) {
++    return ret;
++  }
+ 
+-  const auto ret = sqlite3_step(load_stmt);
+-  size_t foundSize;
+-  bool loadSucceeded = false;
+-  if (ret == SQLITE_ROW) {
+-    // Hit
+-    const auto foundPtr = sqlite3_column_blob(load_stmt, 0);
+-    foundSize = sqlite3_column_int64(load_stmt, 1);
+-    const bool compressed = sqlite3_column_int(load_stmt, 2) != 0;
+-
+-    if (value && valueSize == foundSize) {
+-      loadSucceeded = true;
+-      if (compressed) {
++  ret = sqlite3_step(load_stmt);
++  if (ret == SQLITE_DONE) {
++    // Miss
++    return SQLITE_OK;
++  }
++  if (ret != SQLITE_ROW) {
++    return ret;
++  }
++
++  // Hit
++  const auto foundPtr = sqlite3_column_blob(load_stmt, 0);
++  foundSize = sqlite3_column_int64(load_stmt, 1);
++  const bool compressed = sqlite3_column_int(load_stmt, 2) != 0;
++
++  if (value && valueSize == foundSize) {
++    loaded = true;
++    if (compressed) {
+ #if defined(AURORA_CACHE_USE_ZSTD)
+-        const auto compSize = sqlite3_column_bytes(load_stmt, 0);
+-        const auto zstdRet = ZSTD_decompress(value, valueSize, foundPtr, compSize);
+-        if (ZSTD_isError(zstdRet)) {
+-          Log.error("zstd decompression error: {}", ZSTD_getErrorName(zstdRet));
+-          foundSize = 0;
+-          loadSucceeded = false;
+-        } else if (zstdRet != foundSize) {
+-          Log.error("zstd decompression size mismatch: expected {}, got {}", foundSize, zstdRet);
+-          foundSize = 0;
+-          loadSucceeded = false;
+-        }
+-#else
+-        Log.error("Cache entry is zstd-compressed but zstd support is disabled");
++      const auto compSize = sqlite3_column_bytes(load_stmt, 0);
++      const auto zstdRet = ZSTD_decompress(value, valueSize, foundPtr, compSize);
++      if (ZSTD_isError(zstdRet)) {
++        Log.error("zstd decompression error: {}", ZSTD_getErrorName(zstdRet));
++        foundSize = 0;
++        loaded = false;
++      } else if (zstdRet != foundSize) {
++        Log.error("zstd decompression size mismatch: expected {}, got {}", foundSize, zstdRet);
+         foundSize = 0;
+-        loadSucceeded = false;
++        loaded = false;
++      }
++#else
++      Log.error("Cache entry is zstd-compressed but zstd support is disabled");
++      foundSize = 0;
++      loaded = false;
+ #endif
+-      } else {
+-        if (foundSize != 0 && !foundPtr) {
+-          Log.error("Cache entry is missing raw value data");
+-          foundSize = 0;
+-          loadSucceeded = false;
+-        } else if (foundSize != 0) {
+-          std::memcpy(value, foundPtr, foundSize);
+-        }
++    } else {
++      if (foundSize != 0 && !foundPtr) {
++        Log.error("Cache entry is missing raw value data");
++        foundSize = 0;
++        loaded = false;
++      } else if (foundSize != 0) {
++        std::memcpy(value, foundPtr, foundSize);
+       }
+     }
+-  } else if (ret == SQLITE_DONE) {
+-    // Miss
+-    foundSize = 0;
+-  } else {
+-    Log.error("Looking up cache key failed: {}", sqlite3_errmsg(db));
++  }
++  return SQLITE_OK;
++}
++
++size_t load_from_cache(void const* key, size_t keySize, void* value, size_t valueSize, void*) {
++  std::lock_guard lock(cache_mutex);
++
++  if (!cache_init()) {
+     return 0;
+   }
+ 
+-  check(sqlite3_reset(load_stmt));
++  const auto keyHash = XXH128(key, keySize, 0);
++  size_t foundSize = 0;
++  bool loaded = false;
++  const int ret = load_locked(keyHash, value, valueSize, foundSize, loaded);
++  if (ret != SQLITE_OK) {
++    cache_failed("Looking up cache key", ret);
++    return 0;
++  }
+ 
+-  if (loadSucceeded) {
++  if (loaded) {
+     cache_keys_used.push_back(keyHash);
+   }
+ 
+   return foundSize;
+ }
+ 
+-void store_to_cache(void const* key, size_t keySize, void const* value, size_t valueSize, void*) {
+-  std::lock_guard lock(cache_mutex);
+-
+-  if (!cache_init()) {
+-    return;
+-  }
+-
+-  sqlite::Transaction tx(db, Log, true);
+-  if (!tx) {
+-    Log.error("Failed to open store transaction");
+-    return;
++static int store_locked(const XXH128_hash_t& keyHash, void const* value, size_t valueSize) {
++  CacheTransaction tx("BEGIN IMMEDIATE");
++  if (!tx.active) {
++    return tx.rc;
+   }
+ 
+   const void* storedValue = value;
+@@ -312,7 +434,7 @@ void store_to_cache(void const* key, size_t keySize, void const* value, size_t v
+   const auto bound = ZSTD_compressBound(valueSize);
+   if (ZSTD_isError(bound)) {
+     Log.error("Failed to calculate ZSTD_compressBound: {}", ZSTD_getErrorName(bound));
+-    return;
++    return SQLITE_OK;
+   }
+ 
+   if (compress_buffer.size() < bound) {
+@@ -322,7 +444,7 @@ void store_to_cache(void const* key, size_t keySize, void const* value, size_t v
+   const auto compressRet = ZSTD_compress(compress_buffer.data(), compress_buffer.size(), value, valueSize, 0);
+   if (ZSTD_isError(compressRet)) {
+     Log.error("ZSTD compression error: {}", ZSTD_getErrorName(compressRet));
+-    return;
++    return SQLITE_OK;
+   }
+ 
+   if (compressRet < valueSize) {
+@@ -332,25 +454,47 @@ void store_to_cache(void const* key, size_t keySize, void const* value, size_t v
+   }
+ #endif
+ 
+-  const auto keyHash = XXH128(key, keySize, 0);
+-  check(sqlite3_bind_blob64(store_stmt, 1, &keyHash, sizeof(keyHash), SQLITE_TRANSIENT));
+-  check(
+-      sqlite3_bind_blob64(store_stmt, 2, storedValue, storedValueSize, compressed ? SQLITE_STATIC : SQLITE_TRANSIENT));
+-  check(sqlite3_bind_int64(store_stmt, 3, static_cast<sqlite3_int64>(valueSize)));
+-  check(sqlite3_bind_int(store_stmt, 4, compressed));
+-
+-  const auto ret = sqlite3_step(store_stmt);
+-  if (ret != SQLITE_DONE) {
+-    // Error or something
+-    Log.error("Failed to insert row: {}", sqlite3_errmsg(db));
+-    return;
++  {
++    StatementScope scope{store_stmt};
++    int ret = sqlite3_bind_blob64(store_stmt, 1, &keyHash, sizeof(keyHash), SQLITE_TRANSIENT);
++    if (ret == SQLITE_OK) {
++      ret = sqlite3_bind_blob64(store_stmt, 2, storedValue, storedValueSize,
++                                compressed ? SQLITE_STATIC : SQLITE_TRANSIENT);
++    }
++    if (ret == SQLITE_OK) {
++      ret = sqlite3_bind_int64(store_stmt, 3, static_cast<sqlite3_int64>(valueSize));
++    }
++    if (ret == SQLITE_OK) {
++      ret = sqlite3_bind_int(store_stmt, 4, compressed);
++    }
++    if (ret != SQLITE_OK) {
++      return ret;
++    }
++    ret = sqlite3_step(store_stmt);
++    if (ret != SQLITE_DONE) {
++      return ret;
++    }
+   }
+ 
+-  check(sqlite3_reset(store_stmt));
+-  check(sqlite3_bind_null(store_stmt, 2));
+-  check(sqlite3_bind_null(store_stmt, 4));
++  return tx.commit();
++}
+ 
+-  tx.commit();
++void store_to_cache(void const* key, size_t keySize, void const* value, size_t valueSize, void*) {
++  std::lock_guard lock(cache_mutex);
++
++  if (!cache_init()) {
++    return;
++  }
++
++  const auto keyHash = XXH128(key, keySize, 0);
++  int ret = store_locked(keyHash, value, valueSize);
++  if (ret != SQLITE_OK && sqlite::journal_fallback(db, ret, io::fs_path_to_string(cache_path()), Log)) {
++    ret = store_locked(keyHash, value, valueSize);
++  }
++  if (ret != SQLITE_OK) {
++    cache_failed("Storing cache entry", ret);
++    return;
++  }
+   cache_keys_used.push_back(keyHash);
+ }
+ 
+@@ -366,20 +510,19 @@ void cache_prune() {
+ 
+   uint64_t totalRows = 0;
+   sqlite3_int64 deletedRows = 0;
+-  {
+-    sqlite::Transaction tx(db, Log, true);
+-    if (!tx) {
+-      Log.error("Failed to open dawn cache prune transaction");
+-      return;
++  const auto prune = [&]() -> int {
++    CacheTransaction tx("BEGIN IMMEDIATE");
++    if (!tx.active) {
++      return tx.rc;
+     }
+ 
+     if (!fill_used_key_table(cache_keys_used)) {
+-      return;
++      return sqlite3_errcode(db) != SQLITE_OK ? sqlite3_errcode(db) : SQLITE_ERROR;
+     }
+ 
+     const auto totalRowsResult = select_uint64("SELECT COUNT(*) FROM cache");
+     if (!totalRowsResult) {
+-      return;
++      return sqlite3_errcode(db) != SQLITE_OK ? sqlite3_errcode(db) : SQLITE_ERROR;
+     }
+     totalRows = *totalRowsResult;
+ 
+@@ -389,12 +532,19 @@ void cache_prune() {
+                                   "  SELECT 1 FROM cache_keys_used WHERE cache_keys_used.key = cache.key"
+                                   ")");
+     if (ret != SQLITE_OK) {
+-      Log.error("Failed to prune dawn cache rows: {}", sqlite3_errmsg(db));
+-      return;
++      return ret;
+     }
+     deletedRows = sqlite3_changes64(db);
+ 
+-    tx.commit();
++    return tx.commit();
++  };
++  int pruneRet = prune();
++  if (pruneRet != SQLITE_OK && sqlite::journal_fallback(db, pruneRet, io::fs_path_to_string(cache_path()), Log)) {
++    pruneRet = prune();
++  }
++  if (const int ret = pruneRet; ret != SQLITE_OK) {
++    cache_failed("Pruning the Dawn cache", ret);
++    return;
+   }
+ 
+   if (deletedRows == 0) {
+@@ -418,22 +568,12 @@ void cache_prune() {
+ }
+ 
+ void cache_shutdown() {
++  std::lock_guard lock(cache_mutex);
+ #if defined(AURORA_CACHE_USE_ZSTD)
+   compress_buffer.clear();
+ #endif
+   cache_keys_used.clear();
+-  if (load_stmt != nullptr) {
+-    check(sqlite3_finalize(load_stmt));
+-    load_stmt = nullptr;
+-  }
+-  if (store_stmt != nullptr) {
+-    check(sqlite3_finalize(store_stmt));
+-    store_stmt = nullptr;
+-  }
+-  if (db != nullptr) {
+-    check(sqlite3_close(db));
+-    db = nullptr;
+-  }
++  cache_close();
+ }
+ 
+ } // namespace aurora::webgpu

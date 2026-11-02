@@ -8,7 +8,9 @@
       "game/src/SSystem/SComponent/c_math.cpp",
       "game/src/f_pc/f_pc_method.cpp",
       "native/include/pc/game_hooks.h",
+      "native/include/sdk/dolphin/gx/GXFrameBuf.h",
       "native/sdk/tests/sdk_threads.cpp",
+      "native/sdk/src/gx/GXExtras.cpp",
       "native/src/pc/features/pc_hd_textures.cpp",
       "native/src/pc/harness/sweeps/pc_event_sweep.cpp",
       "native/src/pc/harness/sweeps/pc_save_sweep.cpp",
@@ -18,7 +20,9 @@
       "native/src/pc/runtime/pc_frame.cpp",
       "native/src/pc/runtime/pc_harness.cpp",
       "native/src/pc/runtime/pc_main.cpp",
-      "native/src/pc/features/pc_language.cpp"
+      "native/src/pc/features/pc_language.cpp",
+      "native/cmake/Aurora.cmake",
+      "native/src/pc/harness/pc_shot.cpp"
     ],
     "base": "parent index gitlink",
     "upstreamability": "PS5 integration; assess portable correctness fixes separately",

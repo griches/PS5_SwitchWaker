@@ -1,102 +1,212 @@
+diff --git a/cmake/AuroraDependencyVersions.cmake b/cmake/AuroraDependencyVersions.cmake
+index 50d2c14b0f2e527efd845bbd6041a55c71a8acae..abe6bc000f43c6a2556f1b6a007afade791d6b5a 100644
+--- a/cmake/AuroraDependencyVersions.cmake
++++ b/cmake/AuroraDependencyVersions.cmake
+@@ -17,7 +17,9 @@ _aurora_dependency_version(AURORA_DAWN_VERSION "v20260807.225922" "Dawn prebuilt
+         "v20260523.201736" "v20260603.191052" "v20260618.032059") # Previous versions
+ _aurora_dependency_version(AURORA_DAWN_REF "1155e0ed531126f33a1279afa029349651ca1c93" "Dawn commit ref (https://github.com/encounter/dawn)"
+         "9aa45f938d4b36626722bbfdc2f18447179337e6" "13abc3bc8ea2d3c2050f9e77a12d012108ceee24" "266c1cf8de969a364afa4fa49311631fc99a881e") # Previous versions
+-_aurora_dependency_version(AURORA_SDL3_VERSION "3.4.10" "SDL3 prebuilt version tag (https://github.com/libsdl-org/SDL/releases)")
+-_aurora_dependency_version(AURORA_SDL3_REF "refs/tags/release-3.4.10" "SDL3 commit ref (https://github.com/libsdl-org/SDL)")
++_aurora_dependency_version(AURORA_SDL3_VERSION "3.4.18" "SDL3 prebuilt version tag (https://github.com/libsdl-org/SDL/releases)"
++        "3.4.10") # Previous version
++_aurora_dependency_version(AURORA_SDL3_REF "refs/tags/release-3.4.18" "SDL3 commit ref (https://github.com/libsdl-org/SDL)"
++        "refs/tags/release-3.4.10") # Previous version
+ _aurora_dependency_version(AURORA_NOD_VERSION "v2.0.0-alpha.12" "nod version tag (https://github.com/encounter/nod/releases)"
+         "v2.0.0-alpha.10" "v2.0.0-alpha.11") # Previous versions
 diff --git a/lib/aurora.cpp b/lib/aurora.cpp
-index 4b30763..bce2cc0 100644
+index a0dcabb4a587f16035599d28e0cef361aa2c530d..2007aeade50511a2c3f7b09f167367baad8482d5 100644
 --- a/lib/aurora.cpp
 +++ b/lib/aurora.cpp
-@@ -29,6 +29,7 @@
- #include <SDL3/SDL_filesystem.h>
+@@ -1,3 +1,4 @@
++#include "gx/fifo_profile.hpp"
+ #include <aurora/aurora.h>
+ #include <aurora/time.hpp>
+ 
+@@ -32,6 +33,9 @@
+ #include <SDL3/SDL_init.h>
  #include <magic_enum.hpp>
- 
+ #include <mutex>
 +#include <atomic>
- #include <chrono>
- #include <thread>
++#include <chrono>
++#include <thread>
  
-@@ -240,7 +241,8 @@ const AuroraEvent* update() noexcept {
+ #include "system_info.hpp"
+ #include "tracy/Tracy.hpp"
+@@ -39,7 +43,7 @@
+ namespace aurora {
+ AuroraConfig g_config;
+ uint32_t g_sdlCustomEventsStart;
+-char g_gameName[4];
++char g_gameName[5];
+ 
+ namespace {
+ constexpr Module Log{"aurora"};
+@@ -267,25 +271,47 @@ const AuroraEvent* update() noexcept {
+   return events;
  }
  
+-bool begin_frame() noexcept {
+-  ZoneScoped;
  #ifdef AURORA_ENABLE_GX
--void present_frame(imgui::DrawData imguiDrawData) noexcept;
+-  if (!window::prepare_frame()) {
+-    return false;
 +static std::atomic_bool g_presentSuppressed{false};
 +void present_frame(imgui::DrawData imguiDrawData, bool suppressed) noexcept;
++
++// A gfx frame is being recorded. Written by whichever thread begins and ends frames: the game thread, or
++// the GX FIFO worker with the async end of frame (fifo::set_async_end_frame syncs in between), so a frame
++// begun by one path is ended by the other when the mode changes between aurora_end_frame and
++// aurora_begin_frame.
++bool g_frameBegun = false;
++
++// Async end of frame (patch 0018): gfx::begin_frame on the GX FIFO worker. It fails only while a staging
++// buffer cannot be mapped; the frame's commands need a recording, so it is retried (the synchronous path
++// has the caller retry aurora_begin_frame).
++void begin_frame_on_worker() {
++  for (uint32_t attempt = 0; !gfx::begin_frame(); ++attempt) {
++    if (attempt % 5000 == 0) {
++      Log.warn("begin_frame failed on the GX FIFO worker; retrying");
++    }
++    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
++  g_frameBegun = true;
++}
++#endif
  
- // A gfx frame is being recorded. Written by whichever thread begins and ends frames: the game thread, or
- // the GX FIFO worker with the async end of frame (fifo::set_async_end_frame syncs in between), so a frame
-@@ -299,18 +301,19 @@ void end_frame() noexcept {
+-  // Apply pending viewport policy before beginning the frame
++bool begin_frame() noexcept {
++  ZoneScoped;
++#ifdef AURORA_ENABLE_GX
+   gx::update();
+-  if (!gfx::begin_frame()) {
+-    return false;
+-  }
+-
++  if (!window::prepare_frame()) return false;
+   const auto size = window::get_window_size();
+   initialize_ui(size);
+-  g_imguiFrame = gfx::efb::applied_state().xfb.state && imgui::is_initialized();
+-  if (g_imguiFrame) {
+-    imgui::new_frame(size);
++  if (gx::fifo::async_end_frame()) {
++    gx::fifo::begin_frame_async(begin_frame_on_worker);
++  } else if (gfx::begin_frame()) {
++    g_frameBegun = true;
++  } else {
++    return false;
+   }
++  // UI remains on the game thread. The worker captures its own EFB state.
++  g_imguiFrame = gfx::xfb_target() != gfx::InvalidPresentTarget && imgui::is_initialized();
++  if (g_imguiFrame) imgui::new_frame(size);
+   gx::fifo::begin_frame();
+ #endif
+   return true;
+@@ -294,62 +320,63 @@ bool begin_frame() noexcept {
+ void end_frame() noexcept {
    ZoneScoped;
  #ifdef AURORA_ENABLE_GX
-   auto imguiDrawData = imgui::freeze();
++  imgui::DrawData imguiDrawData;
++  if (g_imguiFrame) {
++    imguiDrawData = imgui::freeze();
++    g_imguiFrame = false;
++  }
 +  const bool suppressed = g_presentSuppressed.load(std::memory_order_relaxed);
-   if (gx::fifo::async_end_frame()) {
-     // Async end of frame (patch 0018): what needs the frame's commands processed (the texture caches, the
-     // last render pass, the frame handed to the render worker) runs on the GX FIFO worker once it gets
-     // there; the game thread goes on (fifo.hpp).
--    gx::fifo::end_frame_async([imguiDrawData = std::move(imguiDrawData)]() mutable {
++  if (gx::fifo::async_end_frame()) {
++    // Async end of frame (patch 0018): what needs the frame's commands processed (the texture caches, the
++    // last render pass, the frame handed to the render worker) runs on the GX FIFO worker once it gets
++    // there; the game thread goes on (fifo.hpp).
 +    gx::fifo::end_frame_async([imguiDrawData = std::move(imguiDrawData), suppressed]() mutable {
-       if (!g_frameBegun) {
-         return;
-       }
-       g_frameBegun = false;
-       gx::texture::end_frame();
-       gfx::finish();
--      present_frame(std::move(imguiDrawData));
++      if (!g_frameBegun) {
++        return;
++      }
++      g_frameBegun = false;
++      gx::texture::end_frame();
++      gfx::finish();
 +      present_frame(std::move(imguiDrawData), suppressed);
-     });
-     return;
-   }
-@@ -319,14 +322,14 @@ void end_frame() noexcept {
++    });
++    return;
++  }
+   gx::fifo::drain();
+   gx::fifo::end_frame();
    gx::texture::end_frame();
    gfx::finish();
-   g_frameBegun = false;
--  present_frame(std::move(imguiDrawData));
+-  imgui::DrawData drawData;
+-  if (g_imguiFrame) {
+-    drawData = imgui::freeze();
+-    g_imguiFrame = false;
+-  }
++  g_frameBegun = false;
 +  present_frame(std::move(imguiDrawData), suppressed);
- #endif
- }
- 
- #ifdef AURORA_ENABLE_GX
- // The frame's present: hands the recorded frame to the render worker. After gfx::finish, on the thread
- // that ended the frame (the GX FIFO worker with the async end of frame).
--void present_frame(imgui::DrawData imguiDrawData) noexcept {
++#endif
++}
++
++#ifdef AURORA_ENABLE_GX
 +void present_frame(imgui::DrawData imguiDrawData, bool suppressed) noexcept {
-   ZoneScoped;
-   const auto& presentSource = webgpu::present_source();
-   const auto viewport = webgpu::calculate_present_viewport(webgpu::g_graphicsConfig.surfaceConfiguration.width,
-@@ -344,14 +347,14 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
+   const auto efb = gfx::efb::applied_state();
+   wgpu::BindGroup rmlBindGroup;
+   bool rmlOverlay = false;
+ #ifdef AURORA_ENABLE_RMLUI
+-  if (efb.xfb.state && efb.xfb.size.native_fb_width && efb.xfb.size.native_fb_height && rmlui::is_initialized()) {
++  if (!suppressed && efb.xfb.state && rmlui::is_initialized()) {
+     const auto& source = efb.present_source();
+     const auto viewport = webgpu::calculate_present_viewport(
+         efb.xfb.size.native_fb_width, efb.xfb.size.native_fb_height, source.size.width, source.size.height);
+-    auto rmlFrame = rmlui::record_frame(viewport, source);
+-    rmlBindGroup = std::move(rmlFrame.bindGroup);
+-    rmlOverlay = rmlFrame.overlay;
++    auto frame = rmlui::record_frame(viewport, source);
++    rmlBindGroup = std::move(frame.bindGroup);
++    rmlOverlay = frame.overlay;
+   }
  #endif
+-  gfx::detail::record_xfb_present(std::move(drawData), std::move(rmlBindGroup), rmlOverlay);
++  if (!suppressed) {
++    gfx::detail::record_xfb_present(std::move(imguiDrawData), std::move(rmlBindGroup), rmlOverlay);
++  }
+   gfx::end_frame([](wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> callbacks) {
+-    constexpr wgpu::CommandBufferDescriptor cmdBufDescriptor{.label = "Redraw command buffer"};
+-    const auto commands = encoder.Finish(&cmdBufDescriptor);
+-    {
+-      ZoneScopedN("Queue Submit");
+-      g_queue.Submit(1, &commands);
+-    }
+-    for (auto& callback : callbacks) {
+-      if (callback) {
+-        callback();
+-      }
+-    }
+-
+-    TracyPlotConfig("aurora: lastVertSize", tracy::PlotFormatType::Memory, false, true, 0);
+-    TracyPlotConfig("aurora: lastUniformSize", tracy::PlotFormatType::Memory, false, true, 0);
+-    TracyPlotConfig("aurora: lastIndexSize", tracy::PlotFormatType::Memory, false, true, 0);
+-    TracyPlotConfig("aurora: lastStorageSize", tracy::PlotFormatType::Memory, false, true, 0);
+-    TracyPlotConfig("aurora: lastTextureUploadSize", tracy::PlotFormatType::Memory, false, true, 0);
+-
+-    const auto& stats = gfx::detail::resources().stats;
+-    TracyPlot("aurora: queuedPipelines", static_cast<int64_t>(stats.queuedPipelines));
+-    TracyPlot("aurora: createdPipelines", static_cast<int64_t>(stats.createdPipelines));
+-    TracyPlot("aurora: drawCallCount", static_cast<int64_t>(stats.drawCallCount));
+-    TracyPlot("aurora: mergedDrawCallCount", static_cast<int64_t>(stats.mergedDrawCallCount));
+-    TracyPlot("aurora: lastVertSize", static_cast<int64_t>(stats.lastVertSize));
+-    TracyPlot("aurora: lastUniformSize", static_cast<int64_t>(stats.lastUniformSize));
+-    TracyPlot("aurora: lastIndexSize", static_cast<int64_t>(stats.lastIndexSize));
+-    TracyPlot("aurora: lastStorageSize", static_cast<int64_t>(stats.lastStorageSize));
+-    TracyPlot("aurora: lastTextureUploadSize", static_cast<int64_t>(stats.lastTextureUploadSize));
++    constexpr wgpu::CommandBufferDescriptor desc{.label = "Redraw command buffer"};
++    const auto commands = encoder.Finish(&desc);
++    webgpu::g_queue.Submit(1, &commands);
++    for (auto& callback : callbacks) if (callback) callback();
+   });
+-
+-#endif
+ }
++#endif
++
+ } // namespace
+ } // namespace aurora
  
-   gfx::end_frame([rmlBindGroup = std::move(rmlBindGroup), rmlOverlay, viewport,
--                  imguiDrawData = std::move(imguiDrawData)](
-+                  imguiDrawData = std::move(imguiDrawData), suppressed](
-                      wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> afterSubmitCallbacks) {
-     wgpu::Texture currentTexture;
-     wgpu::TextureView currentView;
-     auto surfaceStatus = wgpu::SurfaceGetCurrentTextureStatus::Error;
-     {
-       window::SurfaceLock surfaceLock;
--      if (window::is_presentable() && g_surface) {
-+      if (!suppressed && window::is_presentable() && g_surface) {
-         ZoneScopedN("Acquire texture");
-         wgpu::SurfaceTexture surfaceTexture;
-         g_surface.GetCurrentTexture(&surfaceTexture);
-@@ -421,7 +424,7 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
-         imgui::render(pass, imguiDrawData);
-         pass.End();
-       }
--    } else {
-+    } else if (!suppressed) {
-       Log.info("Skipping present; window not presentable");
-     }
-     webgpu::gpu_prof::frame_end(encoder);
-@@ -447,7 +450,9 @@ void present_frame(imgui::DrawData imguiDrawData) noexcept {
-         Log.warn("Surface present failed");
-         webgpu::release_surface();
-       }
--    } else if (g_surface) {
-+    } else if (g_surface && !suppressed) {
-+      // No surface acquisition was attempted during a covered loading frame.
-+      // Its default Error status must not drop the healthy swapchain.
-       switch (surfaceStatus) {
-       case wgpu::SurfaceGetCurrentTextureStatus::Timeout:
-         Log.warn("Surface texture acquisition timed out");
-@@ -511,6 +516,13 @@ void aurora_shutdown() { aurora::shutdown(); }
+@@ -361,6 +388,51 @@ void aurora_shutdown() { aurora::shutdown(); }
  const AuroraEvent* aurora_update() { return aurora::update(); }
  bool aurora_begin_frame() { return aurora::begin_frame(); }
  void aurora_end_frame() { aurora::end_frame(); }
@@ -107,11 +217,49 @@ index 4b30763..bce2cc0 100644
 +  (void)suppressed;
 +#endif
 +}
- void aurora_set_async_end_frame(bool enabled) {
- #ifdef AURORA_ENABLE_GX
-   aurora::gx::fifo::set_async_end_frame(enabled);
++void aurora_set_async_end_frame(bool enabled) {
++#ifdef AURORA_ENABLE_GX
++  aurora::gx::fifo::set_async_end_frame(enabled);
++#else
++  (void)enabled;
++#endif
++}
++bool aurora_get_async_end_frame() {
++#ifdef AURORA_ENABLE_GX
++  return aurora::gx::fifo::async_end_frame();
++#else
++  return false;
++#endif
++}
++void aurora_frame_sync() {
++#ifdef AURORA_ENABLE_GX
++  aurora::gx::fifo::sync();
++#endif
++}
++void aurora_fifo_profile_enable(bool enabled) {
++  if (enabled) {
++    aurora::gx::fifo::profile::start_sampler();
++  }
++  aurora::gx::fifo::profile::g_enabled.store(enabled, std::memory_order_relaxed);
++}
++void aurora_set_fifo_fast_paths(bool enabled) {
++#ifdef AURORA_ENABLE_GX
++  aurora::gx::fifo::set_fast_paths(enabled);
++#else
++  (void)enabled;
++#endif
++}
++void aurora_fifo_profile_get(uint64_t* out, size_t count) {
++  for (size_t i = 0; i < count; ++i) {
++    out[i] = i < AURORA_FIFO_PROFILE_COUNT ? aurora::gx::fifo::profile::g_values[i].load(std::memory_order_relaxed)
++                                           : 0;
++  }
++}
+ SDL_Window* aurora_get_window() { return aurora::window::get_sdl_window(); }
+ AuroraWindowSize aurora_get_window_size() { return aurora::window::get_window_size(); }
+ 
 diff --git a/lib/card/CardGciFolder.cpp b/lib/card/CardGciFolder.cpp
-index 00ff828..2a3809b 100644
+index 00ff8283d72f830fc959fcbc3bcb15640ef60938..2a3809b25d6679bf5da11d35f29ef7f4a5d2edf5 100644
 --- a/lib/card/CardGciFolder.cpp
 +++ b/lib/card/CardGciFolder.cpp
 @@ -2,6 +2,10 @@
@@ -164,10 +312,10 @@ index 00ff828..2a3809b 100644
    std::filesystem::directory_iterator it{filepath, ec};
    if (ec) {
 diff --git a/lib/dawn/BackendBinding.cpp b/lib/dawn/BackendBinding.cpp
-index 447ead8..8ce4942 100644
+index 43303f4db8e7c9ab796c4e191b757aca56a9cfc4..c2e42a1cd2e55613993c4d9e369dbe97991d0cc6 100644
 --- a/lib/dawn/BackendBinding.cpp
 +++ b/lib/dawn/BackendBinding.cpp
-@@ -28,6 +28,13 @@ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptor(SDL_Wind
+@@ -31,6 +31,13 @@ std::shared_ptr<wgpu::ChainedStruct> SetupWindowAndGetSurfaceDescriptor(SDL_Wind
    desc->hwnd = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
    desc->hinstance = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, nullptr);
    return std::move(desc);
@@ -181,33 +329,45 @@ index 447ead8..8ce4942 100644
  #elif defined(SDL_PLATFORM_LINUX)
    const char* driver = SDL_GetCurrentVideoDriver();
    if (SDL_strcmp(driver, "wayland") == 0) {
-diff --git a/lib/dolphin/pad/pad.cpp b/lib/dolphin/pad/pad.cpp
-index ffc16fa..dcce233 100644
---- a/lib/dolphin/pad/pad.cpp
-+++ b/lib/dolphin/pad/pad.cpp
-@@ -96,10 +96,12 @@ std::array<PADButtonMapping, PAD_BUTTON_COUNT> g_defaultButtonsPS4{{
-     {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, PAD_BUTTON_RIGHT},
- }};
+diff --git a/lib/dolphin/gx/GXManage.cpp b/lib/dolphin/gx/GXManage.cpp
+index 0bb5465349b73dfe050d4d3b7bfb84a0d3800d6e..da7ed6a35427685dbb119b0382ab7c6b43000469 100644
+--- a/lib/dolphin/gx/GXManage.cpp
++++ b/lib/dolphin/gx/GXManage.cpp
+@@ -275,7 +275,10 @@ void GXSetDrawDone() {
  
-+// PS5 port: by position, as the GameCube pad has them around A: B to its left (Square), X to its
-+// right (Circle), Y above (Triangle). The controller UI archives use the same face-button mapping.
- std::array<PADButtonMapping, PAD_BUTTON_COUNT> g_defaultButtonsPS5{{
-     {SDL_GAMEPAD_BUTTON_SOUTH, PAD_BUTTON_A},
--    {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_B},
--    {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_X},
-+    {SDL_GAMEPAD_BUTTON_WEST, PAD_BUTTON_B},
-+    {SDL_GAMEPAD_BUTTON_EAST, PAD_BUTTON_X},
-     {SDL_GAMEPAD_BUTTON_NORTH, PAD_BUTTON_Y},
-     {SDL_GAMEPAD_BUTTON_START, PAD_BUTTON_START},
-     {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, PAD_TRIGGER_Z},
+ GXDrawDoneCallback GXSetDrawDoneCallback(GXDrawDoneCallback cb) { return aurora::gx::fifo::set_draw_done_callback(cb); }
+ 
++#if !defined(__PROSPERO__)
++// PS5 uses cos_sdk's implementation, which delivers draw-sync callbacks.
+ void GXSetDrawSync(u16 token) {}
++#endif
+ 
+ u16 GXReadDrawSync() { return 0; }
+ 
+diff --git a/lib/dolphin/gx/GXTexture.cpp b/lib/dolphin/gx/GXTexture.cpp
+index 7e310046696abf5afc85649d57f070083e91a542..737ed047f3daa0686395a96b7579e14de6a4afc9 100644
+--- a/lib/dolphin/gx/GXTexture.cpp
++++ b/lib/dolphin/gx/GXTexture.cpp
+@@ -340,8 +340,11 @@ void GXLoadTlut(const GXTlutObj* obj_, u32 idx) {
+   emit_loaded_tlut_metadata(*obj, idx);
+ }
+ 
++#if !defined(__PROSPERO__)
++// PS5 uses cos_sdk's implementation to initialize the region descriptor.
+ void GXInitTexCacheRegion(GXTexRegion* region, GXBool is_32b_mipmap, u32 tmem_even, GXTexCacheSize size_even,
+                           u32 tmem_odd, GXTexCacheSize size_odd) {}
++#endif
+ // TODO GXInitTexPreLoadRegion
+ // TODO GXInitTlutRegion
+ // TODO GXInvalidateTexRegion
 diff --git a/lib/imgui.cpp b/lib/imgui.cpp
-index 07a0ec1..908adf5 100644
+index b85e0018f6c7847f53abec0373b6c02d87c48de5..21241bc566614ffcde5e403b93aa88bc6557f6f0 100644
 --- a/lib/imgui.cpp
 +++ b/lib/imgui.cpp
-@@ -236,9 +236,16 @@ void render(const wgpu::RenderPassEncoder& pass, const DrawData& drawData) noexc
-     ImGui_ImplSDLRenderer3_RenderDrawData(data, renderer);
+@@ -261,9 +261,16 @@ void render(const wgpu::RenderPassEncoder& pass, const DrawData& drawData) noexc
      SDL_RenderPresent(renderer);
    } else {
+     std::lock_guard lock{g_rendererMutex};
 +#if defined(__PROSPERO__)
 +    // PS5 port: no debug group. Some builds of the title died here at the first frame with
 +    // anything to draw (a check in Dawn's AddNullTerminatedString, under PushDebugGroup); the
@@ -221,3 +381,16 @@ index 07a0ec1..908adf5 100644
    }
  }
  
+diff --git a/lib/input/legacy.cpp b/lib/input/legacy.cpp
+index 2cc38bf48172758d809a543fa0e65b94ddb80eb6..f6a6174f5e4c43bd1f915a59e2b71359a15838d5 100644
+--- a/lib/input/legacy.cpp
++++ b/lib/input/legacy.cpp
+@@ -272,6 +272,8 @@ std::vector<Binding> default_pad_bindings(input::SourceId source) {
+   const auto& controller = it->second;
+   const auto* buttons = &g_defaultButtonsStandard;
+   switch (SDL_GetGamepadType(controller.m_controller)) {
++  // PS5: Square is B and Circle is X, matching our controller prompts.
++  case SDL_GAMEPAD_TYPE_PS5:
+   case SDL_GAMEPAD_TYPE_XBOX360:
+     buttons = &g_defaultButtonsXBox360;
+     break;

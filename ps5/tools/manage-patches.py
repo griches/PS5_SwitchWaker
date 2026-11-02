@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +40,9 @@ def target(name):
     if name == 'aurora':
         pin = match(r'set\(COS_AURORA_COMMIT "([0-9a-f]{40})"',
                     (vendor / 'native/cmake/Aurora.cmake').read_text())
-        return aurora, pin, sorted((vendor / 'native/patches/aurora').glob('*.patch'))
+        # The port's series includes the retained SwitchWaker fixes, rebased onto
+        # this Aurora revision. Do not apply the old upstream stack a second time.
+        return aurora, pin, []
     versions = (aurora / 'cmake/AuroraDependencyVersions.cmake').read_text()
     if name == 'sdl':
         ref = match(r'_aurora_dependency_version\(AURORA_SDL3_REF "([^"]+)"', versions)
@@ -70,7 +73,7 @@ def generate(name, repo, pin, upstream, temporary):
     options = ['--no-ext-diff', '--no-textconv', '--no-renames', '--diff-algorithm=myers',
                '--ignore-submodules=all']
     git(repo, 'diff', '--check', *options, env=env)
-    patch = git(repo, 'diff', '--binary', '--unified=3', '--src-prefix=a/', '--dst-prefix=b/',
+    patch = git(repo, 'diff', '--binary', '--full-index', '--unified=3', '--src-prefix=a/', '--dst-prefix=b/',
                 *options, env=env)
     # Forward application uses another temporary index, never a checkout/reset/clean.
     git(repo, 'read-tree', baseline, env=env)
@@ -120,6 +123,8 @@ def split_topics(name, patch):
 
 
 def verify_series(name, repo, pin, upstream, artifacts, temporary):
+    if git(repo, 'rev-parse', 'HEAD').strip() != git(repo, 'rev-parse', f'{pin}^{{commit}}').strip():
+        raise RuntimeError(f'{name}: checkout HEAD differs from its pin')
     env = dict(os.environ, GIT_INDEX_FILE=str(temporary / f'{name}-series.index'))
     git(repo, 'read-tree', pin, env=env)
     for patch in upstream:
@@ -130,6 +135,45 @@ def verify_series(name, repo, pin, upstream, artifacts, temporary):
             git(repo, 'apply', '--cached', '--whitespace=nowarn', env=env, data=patch)
     if git(repo, 'diff', '--no-ext-diff', '--no-textconv', '--ignore-submodules=all', env=env):
         raise RuntimeError(f'{name}: ordered series differs from source')
+    others = git(repo, 'ls-files', '--others', '--exclude-standard', '-z', env=env).split(b'\0')
+    if any(p and not os.fsdecode(p).startswith('.ps5-') for p in others):
+        raise RuntimeError(f'{name}: unexported source files')
+
+
+def verify_dependencies():
+    """Compare build inputs with their pins plus patches, including nested repos."""
+    subprocess.run([sys.executable, str(ROOT / 'ps5/tools/setup-submodules.py'), '--check'], check=True)
+    overlays = {}
+    for name in NAMES:
+        repo, pin, upstream = target(name)
+        overlays[repo.resolve()] = (name, pin, upstream,
+                                   [(p, p.read_bytes()) for p in overlay_paths(name)])
+    with tempfile.TemporaryDirectory(prefix='ps5-release-source-') as folder:
+        visited = set()
+        def visit(repo, pin):
+            repo = repo.resolve()
+            if repo in visited:
+                return
+            visited.add(repo)
+            name, expected, upstream, artifacts = overlays.get(repo, (f'dep-{len(visited)}', pin, [], []))
+            if git(repo, 'rev-parse', f'{pin}^{{commit}}') != git(repo, 'rev-parse', f'{expected}^{{commit}}'):
+                raise RuntimeError('Dependency patch pin differs from its gitlink')
+            verify_series(name, repo, expected, upstream, artifacts, Path(folder))
+            for entry in git(repo, 'ls-tree', '-r', '-z', pin).split(b'\0'):
+                if not entry:
+                    continue
+                metadata, path = entry.split(b'\t', 1)
+                mode, kind, revision = metadata.split()
+                child = repo / os.fsdecode(path)
+                if mode == b'160000' and (child / '.git').exists():
+                    visit(child, revision.decode())
+        for entry in git(ROOT, 'ls-files', '--stage', '-z').split(b'\0'):
+            if not entry:
+                continue
+            metadata, path = entry.split(b'\t', 1)
+            mode, pin, stage = metadata.split()
+            if mode == b'160000':
+                visit(ROOT / os.fsdecode(path), pin.decode())
 
 
 def main():
@@ -141,12 +185,13 @@ def main():
     with tempfile.TemporaryDirectory(prefix='ps5-patches-') as temporary:
         for name in args.target:
             repo, pin, upstream = target(name)
-            patch = generate(name, repo, pin, upstream, Path(temporary))
-            selected = split_topics(name, patch)
+            if args.write:
+                patch = generate(name, repo, pin, upstream, Path(temporary))
+                selected = split_topics(name, patch)
+            else:
+                # Verify the resulting source, not Git's machine-dependent diff formatting.
+                selected = [(p, p.read_bytes()) for p in overlay_paths(name)]
             verify_series(name, repo, pin, upstream, selected, Path(temporary))
-            for path, content in selected:
-                if not args.write and (not path.exists() or path.read_bytes() != content):
-                    raise RuntimeError(f'{path.relative_to(ROOT)} is stale; review then export --write --target {name}')
             artifacts.extend(selected)
         # Validate all targets before writing any artifact. Real Git indexes are untouched.
         if args.write:

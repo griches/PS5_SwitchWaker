@@ -58,6 +58,11 @@ def match(pattern, text):
 
 def source(check):
     vendor = ensure(ROOT, 'vendor/switchwaker', check=check)
+    if not check:
+        # The port's overlay declares the renderer revision. Materialize it before
+        # validating Aurora, including on a fresh clone of the upstream gitlink.
+        subprocess.run([sys.executable, str(ROOT / 'ps5/tools/prepare-source.py'),
+                        '--target', 'switchwaker'], check=True)
     pin = match(r'set\(COS_AURORA_COMMIT "([0-9a-f]{40})"',
                 (vendor / 'native/cmake/Aurora.cmake').read_text())
     ensure(ROOT, '.deps/aurora', pin, check)

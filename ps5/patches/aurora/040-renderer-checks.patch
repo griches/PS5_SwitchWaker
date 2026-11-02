@@ -1,5 +1,5 @@
 diff --git a/tests/render_worker_test.cpp b/tests/render_worker_test.cpp
-index 74e83ed..f2b6207 100644
+index 74e83edcb7bde49f19bbf72bbb8fa33b47a2b9bd..f2b62070a08540726c11c8dff4cc030265c69017 100644
 --- a/tests/render_worker_test.cpp
 +++ b/tests/render_worker_test.cpp
 @@ -83,6 +83,44 @@ TEST_F(RenderWorkerTest, ShutdownCompletesQueuedWork) {
