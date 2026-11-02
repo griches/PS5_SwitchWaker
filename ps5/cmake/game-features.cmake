@@ -26,6 +26,7 @@ function(ps5_attach_game_features)
         "${PS5_PORT_DIR}/ps5/src/features/pc_gameplay_options.cpp"
         "${PS5_PORT_DIR}/ps5/src/features/pc_player_controls.cpp"
         "${PS5_PORT_DIR}/ps5/src/game_hooks/pc_camera_controls.cpp"
+        "${PS5_PORT_DIR}/ps5/src/game_hooks/pc_player_controls.cpp"
         "${PS5_PORT_DIR}/ps5/src/game_hooks/pc_distant_islands.cpp"
         "${PS5_PORT_DIR}/ps5/src/game_hooks/pc_fast_load.cpp"
         "${PS5_PORT_DIR}/ps5/src/game_hooks/pc_haptics.cpp"

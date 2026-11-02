@@ -18,6 +18,7 @@
 #include "pc_internal.h"
 
 #include "pc/pc_controls.h"
+#include "pc/pc_player_controls.h"
 #include "pc/pc_profiler.h"
 #include "pc/pc_menu_language.h"
 #include "pc/pc_ui_style.h"
@@ -717,6 +718,9 @@ void setOpen(bool open) {
         return;
     }
     m.open = open;
+    // Gameplay polling pauses with the menu. Re-arm from released controls
+    // on return instead of treating a button held in the menu as a new press.
+    pc_player_controls_reset();
     m.warpPage = false;
     m.toolsPage = false;
     m.waitRelease = true;

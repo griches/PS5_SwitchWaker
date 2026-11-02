@@ -1,5 +1,5 @@
 diff --git a/game/include/d/actor/d_a_player_main.h b/game/include/d/actor/d_a_player_main.h
-index 938f3b5e..92e0e1d8 100644
+index 938f3b5e5a422f2685f8e985e8f6d023b21779e0..92e0e1d87edfe52b6725ca0177ae44f510562a8a 100644
 --- a/game/include/d/actor/d_a_player_main.h
 +++ b/game/include/d/actor/d_a_player_main.h
 @@ -1857,6 +1857,11 @@ public:
@@ -15,7 +15,7 @@ index 938f3b5e..92e0e1d8 100644
      void exchangeGrabActor(fopAc_ac_c* actor) { mActorKeepGrab.setData(actor); }
      const cXyz& getDekuLeafWindPos() const { return mFanWindCps.GetStart(); }
 diff --git a/game/include/d/d_camera.h b/game/include/d/d_camera.h
-index aaabe3f8..ef95f739 100644
+index aaabe3f8cc830b69541337160acbe98d5dbd9d13..ef95f7390a831c470d820161a94f08aae186da18 100644
 --- a/game/include/d/d_camera.h
 +++ b/game/include/d/d_camera.h
 @@ -528,6 +528,10 @@ public:
@@ -30,7 +30,7 @@ index aaabe3f8..ef95f739 100644
      bool subjectCamera(s32);
      bool towerCamera(s32);
 diff --git a/game/src/d/actor/d_a_agbsw0.cpp b/game/src/d/actor/d_a_agbsw0.cpp
-index d15c02e0..5845b782 100644
+index d15c02e0d37614b0bfa09af4afdfb86cd37d294d..5845b78236008bcf6d1d75bae0fe87da05331313 100644
 --- a/game/src/d/actor/d_a_agbsw0.cpp
 +++ b/game/src/d/actor/d_a_agbsw0.cpp
 @@ -4,6 +4,9 @@
@@ -80,7 +80,7 @@ index d15c02e0..5845b782 100644
                      fopAcM_onSwitch(this, sw0);
                      if(getMsgNo() == 0xFFFF) {
 diff --git a/game/src/d/actor/d_a_himo2.cpp b/game/src/d/actor/d_a_himo2.cpp
-index e6ee3c32..65ac5bd7 100644
+index e6ee3c3259f05d8f544e37da97ab967efcce7721..65ac5bd71694741d4f811542705b090006edbbf1 100644
 --- a/game/src/d/actor/d_a_himo2.cpp
 +++ b/game/src/d/actor/d_a_himo2.cpp
 @@ -3,6 +3,9 @@
@@ -172,7 +172,7 @@ index e6ee3c32..65ac5bd7 100644
                  // counter goes up by 6 a frame instead of 1
                  int r5 = r3 + (pc_qol(PC_QOL_FAST_GRAPPLE) ? 6 : 1);
 diff --git a/game/src/d/actor/d_a_obj_ftree.cpp b/game/src/d/actor/d_a_obj_ftree.cpp
-index 1608887e..79c61da0 100644
+index 1608887e344d56a58c8d559e99b3d0403b3e1c45..79c61da024de3406757e653779f11b5803a4f221 100644
 --- a/game/src/d/actor/d_a_obj_ftree.cpp
 +++ b/game/src/d/actor/d_a_obj_ftree.cpp
 @@ -4,6 +4,9 @@
@@ -199,7 +199,7 @@ index 1608887e..79c61da0 100644
          get_ftree_info(&info);
          if (info.mTotal != info.mBrought) {
 diff --git a/game/src/d/actor/d_a_obj_movebox.cpp b/game/src/d/actor/d_a_obj_movebox.cpp
-index 1da32966..b08c4e91 100644
+index 1da32966661efa5959c25c2420e3ae73814d30cd..b08c4e912aa259531c04ab9f1bf0dd16ccc91bd6 100644
 --- a/game/src/d/actor/d_a_obj_movebox.cpp
 +++ b/game/src/d/actor/d_a_obj_movebox.cpp
 @@ -3,6 +3,9 @@
@@ -226,7 +226,7 @@ index 1da32966..b08c4e91 100644
          // block type moves one step in 12 frames instead of its m04 / m0A (20)
          const s16 pullFrames = pc_qol(PC_QOL_FAST_BLOCKS) ? 12 : attr()->m0A;
 diff --git a/game/src/d/actor/d_a_player_bottle.inc b/game/src/d/actor/d_a_player_bottle.inc
-index 717c2426..1d85a9f5 100644
+index 717c24262d5282440775d1316923af65bbbbc5ec..1d85a9f5a1aecd046f982b32f887e54e8c820c59 100644
 --- a/game/src/d/actor/d_a_player_bottle.inc
 +++ b/game/src/d/actor/d_a_player_bottle.inc
 @@ -483,7 +483,12 @@ BOOL daPy_lk_c::procBottleSwing() {
@@ -243,7 +243,7 @@ index 717c2426..1d85a9f5 100644
                  }
              }
 diff --git a/game/src/d/actor/d_a_player_climb.inc b/game/src/d/actor/d_a_player_climb.inc
-index 376fdda0..3bf8ebd2 100644
+index 376fdda0f138744a7f279b0f95857526e28a45c2..3bf8ebd216b6571094165ff0ff506f45feb5004b 100644
 --- a/game/src/d/actor/d_a_player_climb.inc
 +++ b/game/src/d/actor/d_a_player_climb.inc
 @@ -210,7 +210,9 @@ void daPy_lk_c::checkBgClimbMove() {
@@ -258,7 +258,7 @@ index 376fdda0..3bf8ebd2 100644
      // 1.6 instead of 1.0
      setSingleMoveAnime(ANM_LADDERUPST, pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mLadder.m.field_0x4, 0.0f, -1,
 diff --git a/game/src/d/actor/d_a_player_crawl.inc b/game/src/d/actor/d_a_player_crawl.inc
-index 9a7ea789..41b76706 100644
+index 9a7ea78952fc2ca79529bc6c70c7f26689d6ae39..41b767068e16d0565915644afa465badd191642b 100644
 --- a/game/src/d/actor/d_a_player_crawl.inc
 +++ b/game/src/d/actor/d_a_player_crawl.inc
 @@ -31,6 +31,13 @@ f32 daPy_lk_c::getCrawlMoveSpeed() {
@@ -284,7 +284,7 @@ index 9a7ea789..41b76706 100644
  
  /* 80138868-801389D0       .text setCrawlMoveDirectionArrow__9daPy_lk_cFv */
 diff --git a/game/src/d/actor/d_a_player_dproc.inc b/game/src/d/actor/d_a_player_dproc.inc
-index 653b45bd..54fd83d1 100644
+index 653b45bde2aeaa516ab3de9e4585ac7ff62fdc76..54fd83d1c4f5f53ca4db09e3ab7eb67675369930 100644
 --- a/game/src/d/actor/d_a_player_dproc.inc
 +++ b/game/src/d/actor/d_a_player_dproc.inc
 @@ -1522,6 +1522,9 @@ BOOL daPy_lk_c::dProcDoorOpen_init() {
@@ -314,7 +314,7 @@ index 653b45bd..54fd83d1 100644
          mAcch.ClrWallNone();
          mAcch.OffLineCheckNone();
 diff --git a/game/src/d/actor/d_a_player_hang.inc b/game/src/d/actor/d_a_player_hang.inc
-index 0b1f9703..36e86577 100644
+index 0b1f9703bd47c509d9ee8eb6499ea51d25ad86cf..36e8657737fc2ff32ffd8ecdddde8a4133ca526a 100644
 --- a/game/src/d/actor/d_a_player_hang.inc
 +++ b/game/src/d/actor/d_a_player_hang.inc
 @@ -601,7 +601,9 @@ BOOL daPy_lk_c::procHangWallCatch_init() {
@@ -329,7 +329,7 @@ index 0b1f9703..36e86577 100644
          // starts at 1.6 instead of 0.8
          pc_qol(PC_QOL_FAST_CLIMB) ? 1.6f : m_HIO->mWallCatch.m.field_0x1C,
 diff --git a/game/src/d/actor/d_a_player_ladder.inc b/game/src/d/actor/d_a_player_ladder.inc
-index f9f12e72..d1211098 100644
+index f9f12e72ac64c16b722c72af48f4caa49aa3a5ec..d121109893cc7edfc1b555108f25457287e9ce6d 100644
 --- a/game/src/d/actor/d_a_player_ladder.inc
 +++ b/game/src/d/actor/d_a_player_ladder.inc
 @@ -16,7 +16,9 @@
@@ -366,7 +366,7 @@ index f9f12e72..d1211098 100644
      // ladder at 1.4 instead of 0.9
      setSingleMoveAnime(anm, pc_qol(PC_QOL_FAST_CLIMB) ? 1.4f : m_HIO->mLadder.m.field_0xC, 0.0f, -1,
 diff --git a/game/src/d/actor/d_a_player_main.cpp b/game/src/d/actor/d_a_player_main.cpp
-index 07bb2497..0a35b49a 100644
+index 07bb24975e9461f8d6bcf48fed9727c14cabf107..0a35b49a69fdbf1d6c2f5fb8a6b3ac7b5a5c6f67 100644
 --- a/game/src/d/actor/d_a_player_main.cpp
 +++ b/game/src/d/actor/d_a_player_main.cpp
 @@ -8,6 +8,12 @@
@@ -636,7 +636,7 @@ index 07bb2497..0a35b49a 100644
                  speedF = mNormalSpeed;
                  procMove_init();
 diff --git a/game/src/d/actor/d_a_player_particle.inc b/game/src/d/actor/d_a_player_particle.inc
-index 2781a1a0..fae861f6 100644
+index 2781a1a052ec64f525ff3a5311aa9bcecfdbfd41..fae861f6aa614f8973033cce1b5f266fec85466d 100644
 --- a/game/src/d/actor/d_a_player_particle.inc
 +++ b/game/src/d/actor/d_a_player_particle.inc
 @@ -579,7 +579,7 @@ void daPy_lk_c::setAuraEffect() {
@@ -649,7 +649,7 @@ index 2781a1a0..fae861f6 100644
                  var_f31 = 1.0f;
              }
 diff --git a/game/src/d/actor/d_a_player_pushpull.inc b/game/src/d/actor/d_a_player_pushpull.inc
-index db7cff91..e44dd138 100644
+index db7cff9187e9318b861c53e6f02ec4af0eec9cc9..e44dd138346c755cfa46d1cb2d230c2fb17707ec 100644
 --- a/game/src/d/actor/d_a_player_pushpull.inc
 +++ b/game/src/d/actor/d_a_player_pushpull.inc
 @@ -126,7 +126,9 @@ BOOL daPy_lk_c::procPushMove_init() {
@@ -675,7 +675,7 @@ index db7cff91..e44dd138 100644
      setSingleMoveAnime(ANM_WALKPULL, pc_qol(PC_QOL_FAST_BLOCKS) ? 1.4f : m_HIO->mPushpull.m.field_0x10, 0.0f, -1,
                         m_HIO->mPushpull.m.field_0x14);
 diff --git a/game/src/d/actor/d_a_player_rope.inc b/game/src/d/actor/d_a_player_rope.inc
-index e5faae5a..334daa70 100644
+index e5faae5a0c2b773b00dcc3f6d8dd23df29ffb69e..334daa703a4a8a49d2ed39d8004e69dc4868a3b1 100644
 --- a/game/src/d/actor/d_a_player_rope.inc
 +++ b/game/src/d/actor/d_a_player_rope.inc
 @@ -767,6 +767,15 @@ BOOL daPy_lk_c::procRopeSwing() {
@@ -695,7 +695,7 @@ index e5faae5a..334daa70 100644
      if (changeRopeEndProc(0)) {
          dVar13 = m35A0 / (100.0f * m_HIO->mItem.mRope.m.field_0x14);
 diff --git a/game/src/d/actor/d_a_player_tact.inc b/game/src/d/actor/d_a_player_tact.inc
-index 6959911b..981c263e 100644
+index 6959911b94ef177a6c8fe6ae724b42bd68d18fff..981c263ef06d69ab073531235e736651f05e4dca 100644
 --- a/game/src/d/actor/d_a_player_tact.inc
 +++ b/game/src/d/actor/d_a_player_tact.inc
 @@ -602,12 +602,20 @@ BOOL daPy_lk_c::procTactPlay() {
@@ -740,7 +740,7 @@ index 6959911b..981c263e 100644
          seStartSystem(JA_SE_TAKT_MATCHED);
          fopMsgM_messageSendOn();
 diff --git a/game/src/d/actor/d_a_player_whide.inc b/game/src/d/actor/d_a_player_whide.inc
-index 0b7219b5..7383ab81 100644
+index 0b7219b5f0b8858c7a02687258ff2a44c2c02e7e..7383ab81c16aa26ff50f371eef878520ffe97652 100644
 --- a/game/src/d/actor/d_a_player_whide.inc
 +++ b/game/src/d/actor/d_a_player_whide.inc
 @@ -37,7 +37,9 @@ void daPy_lk_c::setBlendWHideMoveAnime(f32 param_0) {
@@ -755,7 +755,7 @@ index 0b7219b5..7383ab81 100644
          // a wall at 2.0 instead of 1.6
          anm_speed_0 = pc_qol(PC_QOL_FAST_CLIMB) ? 2.0f : m_HIO->mWall.m.field_0x14;
 diff --git a/game/src/d/actor/d_a_ship.cpp b/game/src/d/actor/d_a_ship.cpp
-index a90ba34e..95ee06e9 100644
+index a90ba34e162caf87afbe3a9ffd9fd2476b2a48c1..95ee06e99f1c7ff6b0da66e44d001d2b15b95cab 100644
 --- a/game/src/d/actor/d_a_ship.cpp
 +++ b/game/src/d/actor/d_a_ship.cpp
 @@ -3,6 +3,9 @@
@@ -1014,7 +1014,7 @@ index a90ba34e..95ee06e9 100644
          // faces, rounded to 45 degrees, as the Wind's Requiem sets it; every value of the row
          // (swift, brisk, and wind: BetterWW normal_sail_wind.asm, the same call without the speeds)
 diff --git a/game/src/d/d_camera.cpp b/game/src/d/d_camera.cpp
-index 1163dccb..fe4775dd 100644
+index 1163dccba87b4d2dbce33f57dde7917a48567af2..8baba425718baebae3a00a6341cb1851bfe6e7b4 100644
 --- a/game/src/d/d_camera.cpp
 +++ b/game/src/d/d_camera.cpp
 @@ -4,6 +4,10 @@
@@ -1133,15 +1133,17 @@ index 1163dccb..fe4775dd 100644
      mWork.subject.m37D = 0;
      return bVar9;
  }
-@@ -5134,13 +5173,20 @@ bool dCamera_c::subjectCamera(s32 param_1) {
+@@ -5134,13 +5173,22 @@ bool dCamera_c::subjectCamera(s32 param_1) {
          // zoom control block
          f32 a = 0.0f;
          f32 b = 0.0f;
 -        if (dCamera_cStickYCmd(mStickCPosYLast) > 0.0f) {
 -            a = dCamMath::rationalBezierRatio(dCamera_cStickYCmd(mStickCPosYLast), mCamSetup.CurveWeight());
 +#if TARGET_PC && defined(__PROSPERO__)
-+        // Telescope/Picto Box zoom is separate from right-stick aiming and inversion.
-+        const f32 zoomStick = mStickMainPosYLast;
++        // Zoom moved to the left stick, but still obeys the native zoom lock.
++        // SubjectLockOn disables main-stick aiming while the telescope tutorial
++        // waits for more zoom. Reading mStickMainPosYLast would deadlock it.
++        const f32 zoomStick = chkFlag(0x800000) ? 0.0f : CPad_GET_STICK_POS_Y(mPadId);
 +#else
 +        const f32 zoomStick = dCamera_cStickYCmd(mStickCPosYLast);
 +#endif
@@ -1158,7 +1160,7 @@ index 1163dccb..fe4775dd 100644
              mWork.subject.m38C = 0.0f;
          }
 diff --git a/game/src/d/d_map.cpp b/game/src/d/d_map.cpp
-index 0650763c..e7a1f67b 100644
+index 0650763ca3b51f3833bf3b14a1bba39af037b0d6..e7a1f67b651a79515bb67986a580ab845a3200fe 100644
 --- a/game/src/d/d_map.cpp
 +++ b/game/src/d/d_map.cpp
 @@ -1,9 +1,15 @@
@@ -1319,7 +1321,7 @@ index 0650763c..e7a1f67b 100644
          GXSetTevAlphaIn(GXTevStageID(r28), GX_CA_ZERO, GXTevAlphaArg(GX_CA_A0 + r28), GX_CA_TEXA, r28 ? GX_CA_APREV : GX_CA_ZERO);
          GXSetTevAlphaOp(GXTevStageID(r28), GX_TEV_ADD, GX_TB_ZERO, GX_CS_SCALE_1, GX_TRUE, GX_TEVPREV);
 diff --git a/game/src/d/d_menu_dmap.cpp b/game/src/d/d_menu_dmap.cpp
-index 4f7abdec..c5411c4b 100644
+index 4f7abdec9431835b78854bb940af5473aacc4cb4..c5411c4ba1ab23ffb137f2444b9ab7807988f5c9 100644
 --- a/game/src/d/d_menu_dmap.cpp
 +++ b/game/src/d/d_menu_dmap.cpp
 @@ -4,6 +4,9 @@
@@ -1380,7 +1382,7 @@ index 4f7abdec..c5411c4b 100644
                          treasure_p[no].ppane->setWhite(g_mdHIO.mTreasureWhite);
                          treasure_p[no].ppane->setBlack(g_mdHIO.mTreasureBlack);
 diff --git a/game/src/d/d_ovlp_fade.cpp b/game/src/d/d_ovlp_fade.cpp
-index 1632e08f..e214c13f 100644
+index 1632e08f0af88990d700bf56a56c8540443e81ec..e214c13faf1fbf54668d9fb3bc0e3d22d1b6e2ae 100644
 --- a/game/src/d/d_ovlp_fade.cpp
 +++ b/game/src/d/d_ovlp_fade.cpp
 @@ -5,6 +5,20 @@
@@ -1464,7 +1466,7 @@ index 1632e08f..e214c13f 100644
      return cPhs_NEXT_e;
  #else
 diff --git a/game/src/d/d_s_open.cpp b/game/src/d/d_s_open.cpp
-index ab080756..e68734b1 100644
+index ab0807560cbbb94aa32a0d60b2c7b659a9f667d4..e68734b12252d3d312837ca355c81fa5b8e34f79 100644
 --- a/game/src/d/d_s_open.cpp
 +++ b/game/src/d/d_s_open.cpp
 @@ -4,6 +4,9 @@
@@ -1502,7 +1504,7 @@ index ab080756..e68734b1 100644
      if (mpProc->isEnd())
          changeGameScene();
 diff --git a/game/src/d/d_save.cpp b/game/src/d/d_save.cpp
-index 1bae9c02..8fc596d0 100644
+index 1bae9c0228d0e5d20421f5a846be8bdbcd4c3057..8fc596d09bdb6aae678c05d6213f98e839773a38 100644
 --- a/game/src/d/d_save.cpp
 +++ b/game/src/d/d_save.cpp
 @@ -3,6 +3,9 @@
@@ -1538,7 +1540,7 @@ index 1bae9c02..8fc596d0 100644
      u32 soundMode = OSGetSoundMode();
      if (soundMode == 0) {
 diff --git a/game/src/d/d_stage.cpp b/game/src/d/d_stage.cpp
-index 06164b00..0006127c 100644
+index 06164b00508658a0ab469746be94033f6e8facbc..0006127c1bd7745605223d02468fc28d2c53e63f 100644
 --- a/game/src/d/d_stage.cpp
 +++ b/game/src/d/d_stage.cpp
 @@ -23,6 +23,9 @@
@@ -1563,7 +1565,7 @@ index 06164b00..0006127c 100644
  
      scene_class* stageProc = fopScnM_SearchByID(dStage_roomControl_c::getProcID());
 diff --git a/game/src/f_op/f_op_scene_req.cpp b/game/src/f_op/f_op_scene_req.cpp
-index 08b0cee0..0febd75a 100644
+index 08b0cee07a202d2078354d7b93142687fc055ef3..0febd75aba4899043ebcb5368713592ca8f0954d 100644
 --- a/game/src/f_op/f_op_scene_req.cpp
 +++ b/game/src/f_op/f_op_scene_req.cpp
 @@ -35,7 +35,46 @@ static cPhs_State fopScnRq_phase_Done(scene_request_class* i_sceneReq) {
@@ -1614,7 +1616,7 @@ index 08b0cee0..0febd75a 100644
      switch (phase_state) {
      case cPhs_NEXT_e:
 diff --git a/game/src/m_Do/m_Do_controller_pad.cpp b/game/src/m_Do/m_Do_controller_pad.cpp
-index f6eff388..78159254 100644
+index f6eff3881afe835a7b1e3999e1993ef83bf7ba73..781592549b798915c47057d9f7984bc0c5e13f0c 100644
 --- a/game/src/m_Do/m_Do_controller_pad.cpp
 +++ b/game/src/m_Do/m_Do_controller_pad.cpp
 @@ -14,6 +14,11 @@
@@ -1663,7 +1665,7 @@ index f6eff388..78159254 100644
  #if VERSION == VERSION_DEMO
      if (!mDoRst::isReset()) {
 diff --git a/native/src/pc/features/pc_gyro.cpp b/native/src/pc/features/pc_gyro.cpp
-index dd3cc754..bb3ce8c8 100644
+index dd3cc75467f9f454e6862757b4405d94f8ae0133..bb3ce8c8cf8fb7449826448bc178e64ea235760c 100644
 --- a/native/src/pc/features/pc_gyro.cpp
 +++ b/native/src/pc/features/pc_gyro.cpp
 @@ -99,6 +99,10 @@ void pc_aim_gyro_reset(void) {
@@ -1678,7 +1680,7 @@ index dd3cc754..bb3ce8c8 100644
      *pitch = 0.0f;
      if (!pc_aim_gyro()) {
 diff --git a/native/src/pc/features/pc_qol.cpp b/native/src/pc/features/pc_qol.cpp
-index 194982e9..c6bdcb1e 100644
+index 194982e9aacf553a9c02768e56e7fc4f52583827..c6bdcb1e5f04f8a628a827210ce582d5cc193eb3 100644
 --- a/native/src/pc/features/pc_qol.cpp
 +++ b/native/src/pc/features/pc_qol.cpp
 @@ -47,6 +47,10 @@ int parse(int which, const char* v) {

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Regional orchestration fixtures. All setup/configure/build tools are inert mocks."""
 import json
+import itertools
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -112,4 +114,17 @@ language = (ROOT / 'vendor/switchwaker/native/src/pc/features/pc_language.cpp').
 assert '#if VERSION == VERSION_PAL' in language and 'ps5_system_language()' in language
 assert '"COS_GAME_LANGUAGE"' in language and 'PC_SETTING_RESTART' in language
 
+# Each save slot may recover only from its own valid backup, regardless of
+# whether the other two slots have valid primary or backup checksums.
+card = (ROOT / 'vendor/switchwaker/game/src/m_Do/m_Do_MemCardRWmng.cpp').read_text()
+recovery = re.findall(r'if \(!csum([012])a && csum([012])b\) \{\s*'
+                     r'memcpy\(&save->gamedata\[([012])\], &save2->gamedata\[([012])\]', card)
+assert len(recovery) == 3
+for checks in itertools.product((False, True), repeat=6):
+    for primary, backup, destination, source in recovery:
+        primary, backup, destination, source = map(int, (primary, backup, destination, source))
+        copies = not checks[primary] and checks[3 + backup]
+        expected = not checks[destination] and checks[3 + destination]
+        assert source == destination and copies == expected, 'save recovery uses another slot checksum'
+print('Save recovery source checks passed: all 64 combinations of primary/backup checksums.')
 print('Universal build checks passed: one configuration, preserved objects, rejected regional modes and PAL language wiring (mock tools only).')

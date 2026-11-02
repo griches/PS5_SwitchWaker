@@ -9,6 +9,8 @@
 
 namespace {
 bool present = true, blocked, jumpHeld, sprintHeld;
+bool gameplayBlocked, captured;
+int assignedIndex = 2;
 bool jumpEnabled = true, sprintEnabled = true;
 float multiplier = 1.5f;
 Sint16 stickX = 32767, stickY;
@@ -17,7 +19,10 @@ SDL_JoystickID controller = 1;
 SDL_Gamepad* fakePad = reinterpret_cast<SDL_Gamepad*>(1);
 }
 namespace pc { bool menuOpen() { return blocked; } }
-extern "C" SDL_Gamepad* PADGetSDLGamepadForIndex(u32 port) { assert(port == 0); return present ? fakePad : nullptr; }
+bool pc_player_controls_blocked() { return gameplayBlocked; }
+extern "C" s32 PADGetIndexForPort(u32 port) { assert(port == 0); return present ? assignedIndex : -1; }
+extern "C" BOOL PADIsInputCaptured(u32 port) { assert(port == 0); return captured; }
+extern "C" SDL_Gamepad* PADGetSDLGamepadForIndex(u32 index) { assert(index == static_cast<u32>(assignedIndex)); return present ? fakePad : nullptr; }
 extern "C" SDL_JoystickID SDLCALL SDL_GetGamepadID(SDL_Gamepad* pad) { assert(pad == fakePad); return controller; }
 extern "C" bool SDLCALL SDL_GamepadConnected(SDL_Gamepad* pad) { assert(pad == fakePad); return present; }
 extern "C" bool SDLCALL SDL_GetGamepadButton(SDL_Gamepad* pad, SDL_GamepadButton button) {
@@ -117,5 +122,17 @@ int main() {
     decision = frame(); assert(!decision.jump && !decision.sprint);
     jumpHeld = sprintHeld = false; frame();
     clickSprint(); ++controller; jumpHeld = true;
+    decision = frame(); assert(!decision.jump && !decision.sprint);
+    jumpHeld = sprintHeld = false; frame();
+    clickSprint(); gameplayBlocked = true;
+    assert(pc_player_controls_run_tuning(17.0f) == 17.0f);
+    assert(!frame().sprint);
+    gameplayBlocked = false;
+    assert(!frame().sprint);
+    clickSprint(); captured = true; assert(!frame().sprint);
+    captured = false; assert(!frame().sprint);
+    pc_player_controls_reset(); jumpHeld = sprintHeld = true;
+    decision = frame(); assert(!decision.jump && !decision.sprint);
+    assignedIndex = 3; ++controller;
     decision = frame(); assert(!decision.jump && !decision.sprint);
 }

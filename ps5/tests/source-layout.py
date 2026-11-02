@@ -160,7 +160,9 @@ assert 'COS_AIM_INVERT_Y' not in presentation_rows
 assert 'CHOICES(kOnOff), "0", applyCameraInvertX' in menu
 assert 'CHOICES(kOnOff), "0", applyCameraInvertY' in menu
 assert 'CPad_GET_SUBSTICK_VALUE(padId) < 0.1f' in ps5_aim
-assert 'const f32 zoomStick = mStickMainPosYLast;' in camera
+# SubjectLockOn sets 0x1000000 (aiming blocked), but tutorial zoom must
+# remain available until the native C-stick/zoom lock (0x800000) is set.
+assert 'const f32 zoomStick = chkFlag(0x800000) ? 0.0f : CPad_GET_STICK_POS_Y(mPadId);' in camera
 orbit = camera.split('// Any direction enters orbit.', 1)[1].split('#else', 1)[0]
 assert '!pc_camera_controls_input().pressed' in orbit and 'mStickCPosYLast' not in orbit
 print('Camera source checks passed: right-stick-only aim, left-stick zoom, orbit in every direction and R3 priority.')

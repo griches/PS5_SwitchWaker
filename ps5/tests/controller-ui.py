@@ -259,6 +259,35 @@ for filename, panes in (('d_scope.cpp', ('mCrtnPane', 'mCzomPane')),
     assert 'setCornerColor(JUtility::TColor(0xffffffff))' in zoom
 print('Zoom prompts passed: left stick, upright, telescope and Picto Box.')
 
+prompts = (ROOT / 'vendor/switchwaker/game/src/f_op/f_op_msg_mng.cpp').read_text()
+assert 'const bool right = mainStick ? aiming : !zoom;' in prompts
+assert 'ps5SetStickPrompt(i_sdwPic, i_iconNo);' in prompts
+assert prompts.count('ps5SetStickPrompt(i_iconPic, i_iconNo);') == 2
+assert '"font_09_02.bti" : "font_07_02.bti", 0' in prompts
+assert '"font_09.bti" : "font_07_01.bti", 1' in prompts
+
+# Rotating a lettered stick also moves its origin and swaps rectangular bounds.
+# All three message renderers must undo those adjustments for replacement art.
+direct = prompts.split('void fopMsgM_outFontDraw(', 1)[1].split('void fopMsgM_outFontDraw2(', 1)[0]
+pane = prompts.split('void fopMsgM_outFontDraw2(', 1)[1].split('fpc_ProcID fopMsgM_Create', 1)[0]
+for draw in (direct, pane):
+    assert 'pc_ui_assets_upright_stick(i_iconNo)' in draw
+    assert 'i_iconPic->rotate(0.0f, 0.0f, ROTATE_Z, 0.0f)' in draw
+assert 'param_3 = originalX;' in direct and 'param_4 = originalY;' in direct
+assert 'i_sdwPic->rotate(0.0f, 0.0f, ROTATE_Z, 0.0f)' in direct
+assert 'temp1 = temp2 = 0;' in pane
+assert 'i_width = originalWidth;' in pane and 'i_height = originalHeight;' in pane
+text_icons = (ROOT / 'vendor/switchwaker/game/src/d/d_2dnumber.cpp').read_text()
+assert 'pc_ui_assets_upright_stick(mIconNo[i])' in text_icons
+assert 'm50[i] = m5C[i] = 0.0f;' in text_icons
+assert 'mpPic[i]->resize(m74 ? mFontSize.mSizeX : m6C,' in text_icons
+assets = (ROOT / 'ps5/src/integration/pc_ui_assets.cpp').read_text()
+upright = assets.split('bool pc_ui_assets_upright_stick(', 1)[1].split('\n}', 1)[0]
+assert 'pc_ui_assets_active() &&' in upright
+assert 'fopMsgM_Icon_C_STICK_e' in upright and 'fopMsgM_Icon_MAIN_STICK_LEFT_RIGHT_e' in upright
+assert 'ARROW' not in upright
+print('Stick orientation source checks passed: direct, pane and text renderers; bounds and stock fallback preserved.')
+
 # Both animation slots use the generated arrow without flattening its border.
 for filename in ('d_scope.cpp', 'd_picture_box.cpp'):
     source = (ROOT / 'vendor/switchwaker/game/src/d' / filename).read_text()

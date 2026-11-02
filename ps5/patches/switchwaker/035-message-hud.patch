@@ -1,5 +1,5 @@
 diff --git a/game/src/d/d_mesg.cpp b/game/src/d/d_mesg.cpp
-index 18faaea7..ae541b69 100644
+index 18faaea7a6c071a68643ad5c6c442b77380fa625..ae541b69972ca50e3b5a6b3ec427d2c4c1dfe753 100644
 --- a/game/src/d/d_mesg.cpp
 +++ b/game/src/d/d_mesg.cpp
 @@ -4,6 +4,9 @@
@@ -412,7 +412,7 @@ index 18faaea7..ae541b69 100644
          i_Msg->screen->dotAnimeInit();
          i_Msg->field_0x164 = 18;
 diff --git a/game/src/d/d_meter.cpp b/game/src/d/d_meter.cpp
-index 05ecca55..64d3983a 100644
+index 05ecca552c990c7fb4a14f11c369373d83e33f16..64d3983a56e81c8fada3b51bd0a2201450c3859e 100644
 --- a/game/src/d/d_meter.cpp
 +++ b/game/src/d/d_meter.cpp
 @@ -3,6 +3,9 @@
@@ -610,7 +610,7 @@ index 05ecca55..64d3983a 100644
      dMeter_compassRotate(&i_Meter->field_0x1670, &i_Meter->field_0x16a8, time);
      dMeter_compassRotate(&i_Meter->field_0x1248, &i_Meter->field_0x12f0, dVar3);
 diff --git a/game/src/d/d_msg.cpp b/game/src/d/d_msg.cpp
-index 6d6aa198..99397e12 100644
+index 6d6aa1986cd8999470f4520e1d0317687bed1dbb..99397e12f2f9ee26cbc04af19f3352cde4af1b3f 100644
 --- a/game/src/d/d_msg.cpp
 +++ b/game/src/d/d_msg.cpp
 @@ -4,6 +4,15 @@
@@ -946,7 +946,7 @@ index 6d6aa198..99397e12 100644
          button_kage[i] = new J2DPicture("font_07_02.bti");
          fopMsgM_blendInit(button_icon[i], "font_00.bti");
 diff --git a/game/src/f_op/f_op_msg_mng.cpp b/game/src/f_op/f_op_msg_mng.cpp
-index f71ea561..00393314 100644
+index f71ea561ccc213e7de4da973a2bc597819e617c8..9ecd0fb86dda4d540409bd23c14ef64a80d7be3e 100644
 --- a/game/src/f_op/f_op_msg_mng.cpp
 +++ b/game/src/f_op/f_op_msg_mng.cpp
 @@ -1,4 +1,8 @@
@@ -976,7 +976,45 @@ index f71ea561..00393314 100644
                  *(dst++) = *(src++);
                  *(dst++) = *(src++);
              } else {
-@@ -1037,6 +1041,12 @@ void fopMsgM_outFontSet(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, s16* i_time
+@@ -1004,6 +1008,26 @@ GXColor fopMsgM_outFontColorWhite(int i_no) {
+     return fopMsgM_buttonW[i_no];
+ }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++// Stick instructions depend on the action: movement is left, aiming is right,
++// and telescope/Picto Box zoom is left. Keep directional animation IDs intact.
++static void ps5SetStickPrompt(J2DPicture* picture, u8 icon) {
++    if (!pc_ui_assets_active()) return;
++    const bool mainStick = icon == fopMsgM_Icon_MAIN_STICK_e ||
++        (icon >= fopMsgM_Icon_MAIN_STICK_UP_e && icon <= fopMsgM_Icon_MAIN_STICK_LEFT_RIGHT_e);
++    if (!mainStick && icon != fopMsgM_Icon_C_STICK_e) return;
++    const bool zoom = dComIfGp_getScopeMesgStatus() != 0 ||
++        dComIfGp_checkPlayerStatus0(0, daPyStts0_TELESCOPE_LOOK_e) ||
++        dComIfGp_checkPlayerStatus1(0, daPyStts1_PICTO_BOX_AIM_e);
++    const bool aiming = zoom || dComIfGp_checkPlayerStatus0(0,
++        daPyStts0_SUBJECT_e | daPyStts0_BOW_AIM_e | daPyStts0_HOOKSHOT_AIM_e |
++        daPyStts0_BOOMERANG_AIM_e | daPyStts0_BOOMERANG_WAIT_e | daPyStts0_ROPE_AIM_e);
++    const bool right = mainStick ? aiming : !zoom;
++    picture->changeTexture(right ? "font_09_02.bti" : "font_07_02.bti", 0);
++    picture->changeTexture(right ? "font_09.bti" : "font_07_01.bti", 1);
++}
++#endif
++
+ /* 8002C6D8-8002C9B0       .text fopMsgM_outFontSet__FP10J2DPictureP10J2DPicturePsUlUc */
+ void fopMsgM_outFontSet(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, s16* i_timer, u32 i_color, u8 i_iconNo) {
+     // Convert special icon numbers to indexes into fopMsgM_buttonTex/fopMsgM_buttonW.
+@@ -1021,6 +1045,10 @@ void fopMsgM_outFontSet(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, s16* i_time
+     i_sdwPic->show();
+     fopMsgM_blendDraw(i_iconPic, fopMsgM_buttonTex[i_iconNo]);
+     fopMsgM_blendDraw(i_sdwPic, fopMsgM_buttonTex[i_iconNo]);
++#if TARGET_PC && defined(__PROSPERO__)
++    ps5SetStickPrompt(i_iconPic, i_iconNo);
++    ps5SetStickPrompt(i_sdwPic, i_iconNo);
++#endif
+     if (
+         i_iconNo == fopMsgM_Icon_ARROW_LEFT_e ||
+         i_iconNo == fopMsgM_Icon_ARROW_RIGHT_e ||
+@@ -1037,6 +1065,12 @@ void fopMsgM_outFontSet(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, s16* i_time
          i_iconPic->setWhite(col);
          i_iconPic->setBlack(0x00000000);
      } else {
@@ -989,7 +1027,17 @@ index f71ea561..00393314 100644
          i_iconPic->setWhite(fopMsgM_buttonW[i_iconNo]);
          i_iconPic->setBlack(0x00000000);
      }
-@@ -1080,6 +1090,12 @@ void fopMsgM_outFontSet(J2DPicture* i_iconPic, s16* i_timer, u32 i_color, u8 i_i
+@@ -1064,6 +1098,9 @@ void fopMsgM_outFontSet(J2DPicture* i_iconPic, s16* i_timer, u32 i_color, u8 i_i
+ 
+     i_iconPic->show();
+     fopMsgM_blendDraw(i_iconPic, fopMsgM_buttonTex[i_iconNo]);
++#if TARGET_PC && defined(__PROSPERO__)
++    ps5SetStickPrompt(i_iconPic, i_iconNo);
++#endif
+     if (
+         i_iconNo == fopMsgM_Icon_ARROW_LEFT_e ||
+         i_iconNo == fopMsgM_Icon_ARROW_RIGHT_e ||
+@@ -1080,6 +1117,12 @@ void fopMsgM_outFontSet(J2DPicture* i_iconPic, s16* i_timer, u32 i_color, u8 i_i
          i_iconPic->setWhite(col);
          i_iconPic->setBlack(0x00000000);
      } else {
@@ -1002,7 +1050,59 @@ index f71ea561..00393314 100644
          i_iconPic->setWhite(fopMsgM_buttonW[i_iconNo]);
          i_iconPic->setBlack(0x00000000);
      }
-@@ -1877,7 +1893,7 @@ u32 fopMsgM_msgDataProc_c::stringLength() {
+@@ -1385,6 +1428,9 @@ void fopMsgM_outFontArrow(J2DPicture* i_iconPic, int* param_2, int* param_3, int
+ 
+ /* 8002DD98-8002DFB4       .text fopMsgM_outFontDraw__FP10J2DPictureP10J2DPictureiiiPsUcUc */
+ void fopMsgM_outFontDraw(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, int param_3, int param_4, int param_5, s16* i_timer, u8 i_alpha, u8 i_iconNo) {
++#if TARGET_PC && defined(__PROSPERO__)
++    const int originalX = param_3, originalY = param_4;
++#endif
+     switch (i_iconNo) {
+     case fopMsgM_Icon_MAIN_STICK_e:
+         fopMsgM_outFontStickAnime(i_iconPic, i_sdwPic, &param_3, &param_4, param_5, i_timer);
+@@ -1415,6 +1461,16 @@ void fopMsgM_outFontDraw(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, int param_
+         break;
+     }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    if (pc_ui_assets_upright_stick(i_iconNo)) {
++        // The offsets above compensate for rotating around the top-left corner.
++        // Keep blend timing, but restore the upright prompt's original box.
++        param_3 = originalX;
++        param_4 = originalY;
++        i_iconPic->rotate(0.0f, 0.0f, ROTATE_Z, 0.0f);
++        i_sdwPic->rotate(0.0f, 0.0f, ROTATE_Z, 0.0f);
++    }
++#endif
+     i_sdwPic->draw(param_3 + 2, param_4 + 1 + g_msgHIO.field_0x6a, param_5, param_5, false, false, false);
+     i_iconPic->draw(param_3, param_4 - 1 + g_msgHIO.field_0x6a, param_5, param_5, false, false, false);
+ 
+@@ -1425,6 +1481,9 @@ void fopMsgM_outFontDraw(J2DPicture* i_iconPic, J2DPicture* i_sdwPic, int param_
+ /* 8002DFB4-8002E204       .text fopMsgM_outFontDraw2__FP10J2DPictureP10J2DPictureiiiiPsUcUc */
+ void fopMsgM_outFontDraw2(J2DPicture* i_iconPic, J2DPicture* param_2, int param_3, int param_4, int i_width, int i_height, s16* i_timer, u8 i_alpha, u8 i_iconNo) {
+     int temp1 = 0, temp2 = 0;
++#if TARGET_PC && defined(__PROSPERO__)
++    const int originalWidth = i_width, originalHeight = i_height;
++#endif
+ 
+     switch (i_iconNo) {
+     case 9:
+@@ -1456,6 +1515,14 @@ void fopMsgM_outFontDraw2(J2DPicture* i_iconPic, J2DPicture* param_2, int param_
+         break;
+     }
+ 
++#if TARGET_PC && defined(__PROSPERO__)
++    if (pc_ui_assets_upright_stick(i_iconNo)) {
++        temp1 = temp2 = 0;
++        i_width = originalWidth;
++        i_height = originalHeight;
++        i_iconPic->rotate(0.0f, 0.0f, ROTATE_Z, 0.0f);
++    }
++#endif
+     param_2->move(param_3, param_4);
+     i_iconPic->move(temp1, temp2);
+     i_iconPic->resize(i_width, i_height);
+@@ -1877,7 +1944,7 @@ u32 fopMsgM_msgDataProc_c::stringLength() {
                  while (player_name[i] != '\0') {
                      int c;
  #if VERSION == VERSION_PAL
@@ -1011,7 +1111,7 @@ index f71ea561..00393314 100644
  #endif
                      {
                          int hi_nibble = (player_name[i] >> 4) & 0xF;
-@@ -3103,7 +3119,7 @@ u32 fopMsgM_msgDataProc_c::stringLength() {
+@@ -3103,7 +3170,7 @@ u32 fopMsgM_msgDataProc_c::stringLength() {
                  int r28;
                  bool r25;
  #if VERSION == VERSION_PAL
@@ -1020,7 +1120,7 @@ index f71ea561..00393314 100644
  #endif
                  {
                      int hi_nibble = ((u8)bmgData[r29] >> 4);
-@@ -3111,8 +3127,12 @@ u32 fopMsgM_msgDataProc_c::stringLength() {
+@@ -3111,8 +3178,12 @@ u32 fopMsgM_msgDataProc_c::stringLength() {
                          r28 = ((u8)bmgData[r29] << 8) | (u8)bmgData[r29 + 1];
                          if (
                              dComIfGs_getClearCount() == 0
@@ -1033,7 +1133,7 @@ index f71ea561..00393314 100644
  #endif
                          ) {
                              for (int i = 0; i < ARRAY_SIZE(zfont); i++) {
-@@ -3774,6 +3794,32 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -3774,6 +3845,32 @@ void fopMsgM_msgDataProc_c::stringSet() {
  
                  count += bmgData[count + 1];
              } else if ((u8)bmgData[count + 2] == 0xFF && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgSpclCode_RUBY) {
@@ -1066,7 +1166,7 @@ index f71ea561..00393314 100644
  #if VERSION < VERSION_PAL
                  if ((u8)bmgData[count + 1] != 5) {
                      int r28 = count + (u8)bmgData[count + 1];
-@@ -3799,6 +3845,7 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -3799,6 +3896,7 @@ void fopMsgM_msgDataProc_c::stringSet() {
                          count += 2;
                      }
                  } else
@@ -1074,7 +1174,7 @@ index f71ea561..00393314 100644
  #endif
                  {
                      count += (u8)bmgData[count + 1];
-@@ -3843,7 +3890,7 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -3843,7 +3941,7 @@ void fopMsgM_msgDataProc_c::stringSet() {
                  while (player_name[r28] != '\0') {
                      int c;
  #if VERSION == VERSION_PAL
@@ -1083,7 +1183,7 @@ index f71ea561..00393314 100644
  #endif
                      {
                          int hi_nibble = ((u8)player_name[r28] >> 4);
-@@ -3910,6 +3957,9 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -3910,6 +4008,9 @@ void fopMsgM_msgDataProc_c::stringSet() {
              } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_UNK03) {
                  waitTimer = (u8)bmgData[count + 5] << 8;
                  waitTimer |= (u8)bmgData[count + 6];
@@ -1093,7 +1193,7 @@ index f71ea561..00393314 100644
                  setAutoSendFlagOn();
                  count += bmgData[count + 1];
              } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_UNK04) {
-@@ -3933,36 +3983,43 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -3933,36 +4034,43 @@ void fopMsgM_msgDataProc_c::stringSet() {
              } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_DUMMY) {
                  count += bmgData[count + 1];
              } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_WAIT) {
@@ -1157,7 +1257,7 @@ index f71ea561..00393314 100644
              } else if ((u8)bmgData[count + 2] == 0 && (u8)bmgData[count + 3] == 0 && (u8)bmgData[count + 4] == MsgCtrlCode_SELECT_TWO) {
                  setSelectFlagOn();
                  lineCount = 0;
-@@ -5472,7 +5529,7 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -5472,7 +5580,7 @@ void fopMsgM_msgDataProc_c::stringSet() {
              int r28;
              bool r27;
  #if VERSION == VERSION_PAL
@@ -1166,7 +1266,7 @@ index f71ea561..00393314 100644
  #endif
              {
                  int hi_nibble = ((u8)bmgData[count] >> 4) & 0xF;
-@@ -5483,8 +5540,12 @@ void fopMsgM_msgDataProc_c::stringSet() {
+@@ -5483,8 +5591,12 @@ void fopMsgM_msgDataProc_c::stringSet() {
                      r28 = ((u8)bmgData[count] << 8) | (u8)bmgData[count + 1];
                      if (
                          dComIfGs_getClearCount() == 0
@@ -1179,7 +1279,7 @@ index f71ea561..00393314 100644
  #endif
                      ) {
                          for (int i = 0; i < ARRAY_SIZE(zfont); i++) {
-@@ -5918,6 +5979,18 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
+@@ -5918,6 +6030,18 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
  #endif
  
                  for (int i = 0; player_name[i] != '\0';) {
@@ -1198,7 +1298,7 @@ index f71ea561..00393314 100644
  #if VERSION < VERSION_PAL
                      int hi_nibble = ((u8)player_name[i] >> 4) & 0xF;
                      if (hi_nibble == 8 || hi_nibble == 9) {
-@@ -5929,6 +6002,7 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
+@@ -5929,6 +6053,7 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
                          c = ((u8)player_name[i] << 8) | (u8)player_name[i+1];
                          i += 2;
                      } else
@@ -1206,7 +1306,7 @@ index f71ea561..00393314 100644
  #endif
                      {
                          sp08[0] = (u8)player_name[i];
-@@ -5946,27 +6020,41 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
+@@ -5946,27 +6071,41 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
                      *param_8 += 1;
                  }
              } else if ((u8)src[offset + 2] == 0xFF && (u8)src[offset + 3] == 0 && (u8)src[offset + 4] == MsgSpclCode_RUBY) {
@@ -1263,7 +1363,7 @@ index f71ea561..00393314 100644
  #if VERSION < VERSION_PAL
              int hi_nibble = ((u8)src[offset] >> 4) & 0xF;
              if (hi_nibble == 8 || hi_nibble == 9) {
-@@ -5978,6 +6066,7 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
+@@ -5978,6 +6117,7 @@ void fopMsgM_msgDataProc_c::getString(char* i_dest, char* param_2, char* param_3
                  c = ((u8)src[offset + 0] << 8) | (u8)src[offset + 1];
                  offset += 2;
              } else

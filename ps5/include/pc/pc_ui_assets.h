@@ -3,6 +3,8 @@
 class JKRArchive;
 void pc_ui_assets_init();
 bool pc_ui_assets_active();
+// Lettered Xelu stick prompts must not inherit GameCube directional rotation.
+bool pc_ui_assets_upright_stick(uint8_t icon);
 // Resource lookups are scoped to a validated archive instance, never global names.
 void* pc_ui_assets_resource(JKRArchive* archive, const char* volume, uint32_t type, const char* path);
 uint32_t pc_ui_assets_size(const void* resource);

@@ -43,6 +43,8 @@ struct PcMovementInput {
     }
 };
 void pc_player_controls_poll();
+void pc_player_controls_reset();
+bool pc_player_controls_blocked();
 PcMovementDecision pc_player_controls_take(bool jumpEligible);
 bool pc_player_controls_sprinting();
 float pc_player_controls_run_tuning(float original);

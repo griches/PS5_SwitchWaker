@@ -4,11 +4,11 @@
 #include "d/d_com_inf_game.h"
 #include "JSystem/JUtility/JUTGamePad.h"
 #include <SDL3/SDL_gamepad.h>
+#include <dolphin/pad.h>
 #include <SDL3/SDL_timer.h>
 #include <cstring>
 #include <cstdlib>
 #include <mutex>
-extern "C" SDL_Gamepad* PADGetSDLGamepadForIndex(u32 index);
 namespace pc { bool menuOpen(); }
 namespace {
 enum Mode { Original, Enhanced, Off };
@@ -59,10 +59,12 @@ bool pc_haptics_forward_motor(int port) {
 }
 void pc_haptics_tick() {
     pc_haptics_init();
+    const int index = PADGetIndexForPort(0);
+    auto* pad = index >= 0 ? PADGetSDLGamepadForIndex(index) : nullptr;
     if (reset) {
         std::lock_guard lock(outputMutex);
         // Stop any native motor command when adopting a new mode.
-        if (auto* pad=PADGetSDLGamepadForIndex(0)) SDL_RumbleGamepad(pad,0,0,0);
+        if (pad) SDL_RumbleGamepad(pad,0,0,0);
         stopLocked();
         shape = {};
         reset = false;
@@ -70,7 +72,7 @@ void pc_haptics_tick() {
     if (mode != Enhanced || pc::menuOpen()) {
         std::lock_guard lock(outputMutex);
         stopLocked();
-        if ((mode == Off || pc::menuOpen())) if (auto* pad=PADGetSDLGamepadForIndex(0)) SDL_RumbleGamepad(pad,0,0,0);
+        if ((mode == Off || pc::menuOpen())) if (pad) SDL_RumbleGamepad(pad,0,0,0);
         return;
     }
     if (!watchdog) watchdog = SDL_AddTimer(20,expire,nullptr);
@@ -86,7 +88,6 @@ void pc_haptics_tick() {
         {shock.mPatternIdx,shock.mCurrentFrame,shock.mLength,shock.mRounds,shock.mPattern},
         {quake.mPatternIdx,quake.mCurrentFrame,quake.mLength,quake.mRounds,quake.mPattern}};
     const auto now = SDL_GetTicksNS();
-    auto* pad = PADGetSDLGamepadForIndex(0);
     const auto level = shape.update(sample,now,pad == nullptr,strength);
     std::lock_guard lock(outputMutex);
     if (!pad) { stopLocked(); return; }

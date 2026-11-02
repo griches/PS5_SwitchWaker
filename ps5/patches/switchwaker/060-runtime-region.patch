@@ -1,5 +1,5 @@
 diff --git a/game/include/d/d_message_paper.h b/game/include/d/d_message_paper.h
-index edb5e6ea..034f33a9 100644
+index edb5e6ea8151956bedc32a53a433e3cc17f8a0e5..034f33a91c5eb2101a4c4887856b0c76ece1af53 100644
 --- a/game/include/d/d_message_paper.h
 +++ b/game/include/d/d_message_paper.h
 @@ -5,7 +5,7 @@
@@ -12,7 +12,7 @@ index edb5e6ea..034f33a9 100644
  
  class dDlst_2DMSG3_c : public dDlst_base_c {
 diff --git a/game/include/global.h b/game/include/global.h
-index 09677d10..c5c1e5ed 100644
+index 09677d105468b3d2f9a4d6ebee3f70461298f905..c5c1e5ed0c58cd15b595e0e2e277fa30546dfd6d 100644
 --- a/game/include/global.h
 +++ b/game/include/global.h
 @@ -91,6 +91,18 @@ extern void __sync();
@@ -35,7 +35,7 @@ index 09677d10..c5c1e5ed 100644
      #define VERSION_SELECT(DEMO, JPN, USA, PAL) (DEMO)
      #define DEMO_SELECT(DEMO, RETAIL) (DEMO)
 diff --git a/game/src/d/actor/d_a_agb.cpp b/game/src/d/actor/d_a_agb.cpp
-index 4716971a..88f25dd1 100644
+index 4716971a6d7d1700712e97f07017b35da5f92f9b..88f25dd12f30b0e04e7c0997d0923ba1b3f25bc6 100644
 --- a/game/src/d/actor/d_a_agb.cpp
 +++ b/game/src/d/actor/d_a_agb.cpp
 @@ -256,6 +256,36 @@ u8 sjis2chrNo(const char* i_chr) {
@@ -117,7 +117,7 @@ index 4716971a..88f25dd1 100644
          JUT_ASSERT(VERSION_SELECT(714, 715, 1000, 1001), l_gbaCommand != NULL);
  
 diff --git a/game/src/d/actor/d_a_mgameboard.cpp b/game/src/d/actor/d_a_mgameboard.cpp
-index 510ba6e6..997b8884 100644
+index 510ba6e6125958cbb0955bb73b42ad5c6b5b2871..997b888490835c078ca141b33756cb6a74e23e47 100644
 --- a/game/src/d/actor/d_a_mgameboard.cpp
 +++ b/game/src/d/actor/d_a_mgameboard.cpp
 @@ -574,10 +574,15 @@ cPhs_State daMgBoard_c::_create() {
@@ -137,7 +137,7 @@ index 510ba6e6..997b8884 100644
      cPhs_State phase = dComIfG_resLoad(&mPhase, m_arcname);
      if (phase == cPhs_COMPLEATE_e) {
 diff --git a/game/src/d/actor/d_a_title.cpp b/game/src/d/actor/d_a_title.cpp
-index a952b393..80814714 100644
+index a952b39397903ffc93c21f8db01c98e53a057137..80814714edb651b295ce2867724748a036c0f5bd 100644
 --- a/game/src/d/actor/d_a_title.cpp
 +++ b/game/src/d/actor/d_a_title.cpp
 @@ -21,8 +21,12 @@
@@ -223,10 +223,20 @@ index a952b393..80814714 100644
  
      cPhs_State phase_state = dComIfG_resLoad(&mPhs, ARCNAME);
 diff --git a/game/src/d/d_2dnumber.cpp b/game/src/d/d_2dnumber.cpp
-index c161909b..609441e1 100644
+index c161909bcff507820877b24ed1c3a46af9a3f193..e802867e52e41ef299c4fab263a1a404d19ceccf 100644
 --- a/game/src/d/d_2dnumber.cpp
 +++ b/game/src/d/d_2dnumber.cpp
-@@ -396,6 +396,11 @@ f32 dDlst_2DOutFont_c::iconset(int i_iconNo, char** param_1) {
+@@ -5,6 +5,9 @@
+ #include "JSystem/J2DGraph/J2DOrthoGraph.h"
+ #include "JSystem/J2DGraph/J2DTextBox.h"
+ #include <stdio.h>
++#if TARGET_PC && defined(__PROSPERO__)
++#include "pc/pc_ui_assets.h"
++#endif
+ 
+ /* 800C8498-800C84B4       .text __ct__16dDlst_2DNumber_cFv */
+ dDlst_2DNumber_c::dDlst_2DNumber_c() {}
+@@ -396,6 +399,11 @@ f32 dDlst_2DOutFont_c::iconset(int i_iconNo, char** param_1) {
              break;
          }
  
@@ -238,7 +248,7 @@ index c161909b..609441e1 100644
  #if VERSION == VERSION_PAL
          var_f31 = 0.5f + (m6C + mCharSpace);
  
-@@ -406,6 +411,7 @@ f32 dDlst_2DOutFont_c::iconset(int i_iconNo, char** param_1) {
+@@ -406,6 +414,7 @@ f32 dDlst_2DOutFont_c::iconset(int i_iconNo, char** param_1) {
  
          char buffer[16];
          sprintf(buffer, "\x1B""CR[%d]", (int)(var_f31 + 0.5f));
@@ -246,7 +256,7 @@ index c161909b..609441e1 100644
  #endif
  
          char c;
-@@ -536,6 +542,39 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+@@ -536,6 +545,39 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
  
              message += *message - 1;
          } else {
@@ -286,7 +296,7 @@ index c161909b..609441e1 100644
  #if VERSION < VERSION_PAL
              int hi_nibble = ((u8)*message >> 4) & 0xF;
              if (hi_nibble == 8 || hi_nibble == 9) {
-@@ -568,14 +607,19 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+@@ -568,14 +610,19 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
                      }
                  }
              } else
@@ -306,7 +316,7 @@ index c161909b..609441e1 100644
  #endif
                      char sp24[16];
                      *dst = 0;
-@@ -621,6 +665,14 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+@@ -621,6 +668,14 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
  
      *dst = 0;
  
@@ -321,7 +331,7 @@ index c161909b..609441e1 100644
      #if VERSION == VERSION_PAL
      f32 y = ((mpTextBox->getHeight() - mFontSize.mSizeY) - m82 * mpTextBox->getLineSpace()) / 2;
      #elif VERSION >= VERSION_USA
-@@ -631,6 +683,7 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+@@ -631,6 +686,7 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
      #else
      f32 y = ((mpTextBox->getHeight() - m6C) - m82 * mpTextBox->getLineSpace()) / 2;
      #endif
@@ -329,7 +339,7 @@ index c161909b..609441e1 100644
  
      char sp14[16];
      int temp_r30 = (mpTextBox->getWidth() - m68) / 2;
-@@ -674,6 +727,18 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+@@ -674,6 +730,18 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
  
      #if VERSION >= VERSION_USA
      if (m74) {
@@ -348,7 +358,7 @@ index c161909b..609441e1 100644
      #if VERSION == VERSION_PAL
          if (mpTextBox->getWidth() - 5.0f < m68) {
              f32 ratio = (mpTextBox->getWidth() - 5.0f) / m68;
-@@ -685,6 +750,7 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
+@@ -685,6 +753,7 @@ void dDlst_2DOutFont_c::messageSet(u32 i_msgNo) {
          if (mpTextBox->getWidth() < m68) {
              mFontSize.mSizeX = (int)(mFontSize.mSizeX * (mpTextBox->getWidth() / m68));
      #endif
@@ -356,8 +366,23 @@ index c161909b..609441e1 100644
  
              J2DTextBox::TFontSize fontSize = mFontSize;
              mpTextBox->setFontSize(fontSize);
+@@ -953,6 +1022,14 @@ void dDlst_2DOutFont_c::move() {
+             outFontStickAnime3(i, 1);
+             break;
+         }
++#if TARGET_PC && defined(__PROSPERO__)
++        if (pc_ui_assets_upright_stick(mIconNo[i])) {
++            m50[i] = m5C[i] = 0.0f;
++            mpPic[i]->rotate(0.0f, 0.0f, ROTATE_Z, 0.0f);
++            mpPic[i]->resize(m74 ? mFontSize.mSizeX : m6C,
++                             m74 ? mFontSize.mSizeY : m6C);
++        }
++#endif
+     }
+ 
+     for (int i = 0; i < 3; i++) {
 diff --git a/game/src/d/d_message_paper.cpp b/game/src/d/d_message_paper.cpp
-index 0a9130e9..1a768b24 100644
+index 0a9130e979b9eb193b4eda0597249b5a45c82a12..1a768b24d0a227d929654f70fd632efc64fc54ca 100644
 --- a/game/src/d/d_message_paper.cpp
 +++ b/game/src/d/d_message_paper.cpp
 @@ -24,7 +24,7 @@
@@ -404,7 +429,7 @@ index 0a9130e9..1a768b24 100644
 +msg_process_profile_definition g_profile_MSG3 = REGION_PAL ? g_profile_MSG3_pal : g_profile_MSG3_us;
 +#endif
 diff --git a/game/src/d/d_minigame_starter.cpp b/game/src/d/d_minigame_starter.cpp
-index 173e66e0..89ad6ff3 100644
+index 173e66e025f98de043c5a2203bb0563cd4a31f84..89ad6ff3935e95d41297d7deb66918a65dc81466 100644
 --- a/game/src/d/d_minigame_starter.cpp
 +++ b/game/src/d/d_minigame_starter.cpp
 @@ -46,12 +46,23 @@ cPhs_State dMinigame_Starter_c::_create() {
@@ -432,7 +457,7 @@ index 173e66e0..89ad6ff3 100644
              mDoExt_restoreCurrentHeap();
              mDoExt_adjustSolidHeap(mHeap);
 diff --git a/game/src/d/d_minigame_terminater.cpp b/game/src/d/d_minigame_terminater.cpp
-index 2b2ee2d7..0aa41bbf 100644
+index 2b2ee2d76a19f2f6cadf88528d0659276be334d4..0aa41bbf63db4831411a4009c2adc8e6ebee9c4b 100644
 --- a/game/src/d/d_minigame_terminater.cpp
 +++ b/game/src/d/d_minigame_terminater.cpp
 @@ -66,6 +66,43 @@ cPhs_State dMinigame_Terminater_c::_create() {
@@ -488,7 +513,7 @@ index 2b2ee2d7..0aa41bbf 100644
              mDoExt_restoreCurrentHeap();
              mDoExt_adjustSolidHeap(mHeap);
 diff --git a/game/src/d/d_place_name.cpp b/game/src/d/d_place_name.cpp
-index da28e2d1..5660024a 100644
+index da28e2d10845da1fd5337935ed7fdecfe7b33548..5660024ab9af5ed6940babaa26c216f8e21531b1 100644
 --- a/game/src/d/d_place_name.cpp
 +++ b/game/src/d/d_place_name.cpp
 @@ -148,11 +148,21 @@ cPhs_State dPn_c::_create() {
@@ -539,7 +564,7 @@ index da28e2d1..5660024a 100644
  
          mState = 2;
 diff --git a/game/src/d/d_s_logo.cpp b/game/src/d/d_s_logo.cpp
-index c57c0208..a0fba1ea 100644
+index c57c0208818552a2784e3ac67e8eb61d56ab7fc0..a0fba1ea668a603e4412b44e222e8cb6933dbcfe 100644
 --- a/game/src/d/d_s_logo.cpp
 +++ b/game/src/d/d_s_logo.cpp
 @@ -625,8 +625,10 @@ static BOOL dScnLogo_Delete(dScnLogo_c* i_this) {
@@ -689,7 +714,7 @@ index c57c0208..a0fba1ea 100644
  #if VERSION > VERSION_JPN
      l_msgDtCommand2 = onMemMount("/res/Msg/bmgresh.arc");
 diff --git a/game/src/d/d_s_title.cpp b/game/src/d/d_s_title.cpp
-index ade83534..784e1fb4 100644
+index ade83534cdc325f2a28de0600f96d5ac85ae723d..784e1fb4dd23cbc70ea94391b24c16ce28aec362 100644
 --- a/game/src/d/d_s_title.cpp
 +++ b/game/src/d/d_s_title.cpp
 @@ -100,8 +100,10 @@ static BOOL dScnTitle_IsDelete(title_of_scene_class* i_this) {
@@ -715,7 +740,7 @@ index ade83534..784e1fb4 100644
      }
  #endif
 diff --git a/game/src/d/d_scope.cpp b/game/src/d/d_scope.cpp
-index 90e8f2f7..c1f533c4 100644
+index 90e8f2f7f19d3c335a84491bc8a2c22f869ef1f9..d541b08d530c74448b6d9335d5babf7654dff2d2 100644
 --- a/game/src/d/d_scope.cpp
 +++ b/game/src/d/d_scope.cpp
 @@ -6,6 +6,9 @@
@@ -728,7 +753,62 @@ index 90e8f2f7..c1f533c4 100644
  #endif
  #include "d/d_scope.h"
  #include "f_op/f_op_msg.h"
-@@ -159,6 +162,20 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+@@ -73,9 +76,44 @@ void dScp_closeDemoProc(sub_scp_class*);
+ void dDlst_2DSCP_c::draw() {
+     J2DOrthoGraph* graf = dComIfGp_getCurrentGrafPort();
+     graf->setPort();
++#if TARGET_PC && defined(__PROSPERO__)
++    // Cover the bottom edge of the scripted bird sequence's scope mask.
++    // J2DGrafContext::setScissor shifts its bottom up one source row; extending
++    // geometry alone cannot cover that clipped row. Compensate in a local
++    // context, only while the demo mask is visible (not its letterboxed shots).
++    J2DPane* bottomMask = mpScp->mWpxxPanes[5].pane;
++    const bool demoMask = (mpScp->mStatus == fopMsgStts_SCOPE_DEMO_e ||
++        mpScp->mDemoCloseFlag != 0) && bottomMask->isVisible();
++    J2DOrthoGraph maskGraf(*graf);
++    if (demoMask) {
++        maskGraf.mScissorBounds.f.y += 1.0f;
++        maskGraf.setScissor();
++    }
++    // Also cover the projection's half-row extension, without moving the
++    // mask's inner edge or changing the animation's stored bounds.
++    const auto bottomBounds = bottomMask->getBounds();
++    const f32 screenBottom = graf->getOrtho()->f.y + 0.5f;
++    const bool extendBottom = demoMask &&
++        bottomBounds.i.y < screenBottom && bottomBounds.f.y < screenBottom;
++    if (extendBottom) {
++        bottomMask->resize(bottomBounds.getWidth(), screenBottom - bottomBounds.i.y);
++    }
++    dScp_ScpScreen->draw(0.0f, 0.0f, demoMask ? &maskGraf : graf);
++#else
+     dScp_ScpScreen->draw(0.0f, 0.0f, graf);
++#endif
++#if TARGET_PC && defined(__PROSPERO__)
++    if (extendBottom) {
++        bottomMask->resize(bottomBounds.getWidth(), bottomBounds.getHeight());
++    }
++    if (demoMask) graf->setScissor();
++#endif
+     dScp_MsgScreen->draw(0.0f, 0.0f, graf);
+     outFontDraw();
++#if TARGET_PC && defined(__PROSPERO__)
++    // The widescreen side bars must cover the same last row as the demo mask.
++    if (demoMask) maskGraf.setScissor();
++#endif
+ #if TARGET_PC
+     // Widescreen (pc_aspect.h): black bars left and right of the 4:3 picture (the 16:9 code's added
+     // code at 0x80004074, branched to from this function's return at 0x802375E4).
+@@ -89,6 +127,9 @@ void dDlst_2DSCP_c::draw() {
+         J2DFillBox(640.0f, -32.0f, 130.0f, 640.0f, JUtility::TColor(0x000000FF));
+     }
+ #endif
++#if TARGET_PC && defined(__PROSPERO__)
++    if (demoMask) graf->setScissor();
++#endif
+ }
+ 
+ /* 802375E8-80237720       .text outFontDraw__13dDlst_2DSCP_cFv */
+@@ -159,6 +200,20 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
      fopMsgM_paneTrans(&i_Scp->mCzomPane, 0.0f, 0.0f);
  #endif
  
@@ -749,7 +829,7 @@ index 90e8f2f7..c1f533c4 100644
      fopMsgM_blendInit(&i_Scp->mCrtnPane, "font_09_02.bti");
      fopMsgM_blendInit(&i_Scp->mCzomPane, "font_09_02.bti");
  
-@@ -168,9 +185,27 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+@@ -168,9 +223,27 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
          ROTATE_Z,
          180.0f
      );
@@ -777,7 +857,7 @@ index 90e8f2f7..c1f533c4 100644
  
      dScp_wipeMove(i_Scp, 3.0f);
  
-@@ -186,6 +221,23 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+@@ -186,6 +259,23 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
      i_Scp->mpTextBoxSdw = (J2DTextBox*)dScp_MsgScreen->search('tx80');
      i_Scp->mpRubyBoxSdw = (J2DTextBox*)dScp_MsgScreen->search('tx81');
  
@@ -801,7 +881,7 @@ index 90e8f2f7..c1f533c4 100644
  #if VERSION == VERSION_PAL
      if (dComIfGs_getOptRuby()) {
          i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 14.0f);
-@@ -199,6 +251,7 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
+@@ -199,6 +289,7 @@ void dScp_ScreenDataSet(sub_scp_class* i_Scp) {
          i_Scp->mpTextBox->move(i_Scp->mpTextBox->getBounds().i.x, i_Scp->mpTextBox->getBounds().i.y - 4.0f);
          i_Scp->mpTextBoxSdw->move(i_Scp->mpTextBoxSdw->getBounds().i.x, i_Scp->mpTextBoxSdw->getBounds().i.y - 4.0f);
      }
@@ -810,7 +890,7 @@ index 90e8f2f7..c1f533c4 100644
  
      i_Scp->mpRubyBox->move(i_Scp->mpRubyBox->getBounds().i.x, i_Scp->mpRubyBox->getBounds().i.y - 3.0f);
 diff --git a/game/src/m_Do/m_Do_MemCardRWmng.cpp b/game/src/m_Do/m_Do_MemCardRWmng.cpp
-index 2b4f389a..88b5524f 100644
+index 2b4f389a03d0b6f82db7058adca61c46185cf357..2841abeb31a87a73cbf41d179f09641a5d5b5009 100644
 --- a/game/src/m_Do/m_Do_MemCardRWmng.cpp
 +++ b/game/src/m_Do/m_Do_MemCardRWmng.cpp
 @@ -54,10 +54,19 @@ s32 mDoMemCdRWm_Store(CARDFileInfo* card, void* data, u32 size) {
@@ -833,6 +913,15 @@ index 2b4f389a..88b5524f 100644
  #endif
      s32 csum = mDoMemCdRWm_CalcCheckSum(save, sizeof(card_savedata) - sizeof(save->csum));
      save->csum = csum;
+@@ -142,7 +151,7 @@ s32 mDoMemCdRWm_Restore(CARDFileInfo* card, void* dst, u32 size) {
+         memcpy(&save->gamedata[0], &save2->gamedata[0], sizeof(card_gamedata));
+         needsWrite = TRUE;
+     }
+-    if (!csum1a && csum2b) { // TODO: is this a bug? typo for `!csum1a && csum1b`?
++    if (!csum1a && csum1b) {
+         memcpy(&save->gamedata[1], &save2->gamedata[1], sizeof(card_gamedata));
+         needsWrite = TRUE;
+     }
 @@ -166,6 +175,23 @@ s32 mDoMemCdRWm_Restore(CARDFileInfo* card, void* dst, u32 size) {
      }
  
@@ -866,7 +955,7 @@ index 2b4f389a..88b5524f 100644
      mDoMemCd_setDataVersion(save->data_version);
      if (!invalid && mDoMemCd_getPictDataPtr() != NULL) {
 diff --git a/game/src/m_Do/m_Do_gba_com.cpp b/game/src/m_Do/m_Do_gba_com.cpp
-index f15ea209..b8587de0 100644
+index f15ea2093519b612dd917dc10fd5ed26d7b06e9b..b8587de0d870b7305f4f953a60eae70637dfc7db 100644
 --- a/game/src/m_Do/m_Do_gba_com.cpp
 +++ b/game/src/m_Do/m_Do_gba_com.cpp
 @@ -458,7 +458,7 @@ void mDoGaC_agbCom_c::mDoGaC_CodeExchange0() {
@@ -888,7 +977,7 @@ index f15ea209..b8587de0 100644
      } else {
          field_0x2 = 0;
 diff --git a/native/include/pc/pc_game_id.h b/native/include/pc/pc_game_id.h
-index 66f2d7d6..43679b91 100644
+index 66f2d7d61e5c461a0e5f7e870504b3cd65c33d7a..43679b91dd9735d309e6993db8c8fcd783595230 100644
 --- a/native/include/pc/pc_game_id.h
 +++ b/native/include/pc/pc_game_id.h
 @@ -14,12 +14,27 @@
@@ -921,7 +1010,7 @@ index 66f2d7d6..43679b91 100644
  #define PC_GAME_REGION_ES (PC_GAME_IS_EUR ? "Europa" : "EE. UU.")
  #define PC_GAME_ISO_NAME COS_GAME_ID_STR ".iso"
 diff --git a/native/src/pc/runtime/pc_assets.cpp b/native/src/pc/runtime/pc_assets.cpp
-index 9749716a..e9f0fe2a 100644
+index 9749716a9c0f3b686b84ca594404c02aa898c944..e9f0fe2a8a3438d7658acb4e4836a1caf1f67bd1 100644
 --- a/native/src/pc/runtime/pc_assets.cpp
 +++ b/native/src/pc/runtime/pc_assets.cpp
 @@ -20,6 +20,9 @@

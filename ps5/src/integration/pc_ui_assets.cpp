@@ -3,7 +3,9 @@
 #include "pc/pc_ui_assets.h"
 #include "pc/pc_ui_transform.h"
 #include "pc/pc_disc_region.h"
+#include "global.h"
 #include "JSystem/JKernel/JKRArchive.h"
+#include "f_op/f_op_msg_mng.h"
 #include <dolphin/gx.h>
 #include <aurora/texture.hpp>
 #include <algorithm>
@@ -213,6 +215,12 @@ void pc_ui_assets_forget(const JKRArchive* archive) {
     menuActive.store(menu, std::memory_order_release);
 }
 bool pc_ui_assets_active() { return menuActive.load(std::memory_order_acquire); }
+
+bool pc_ui_assets_upright_stick(uint8_t icon) {
+    return pc_ui_assets_active() && (icon == fopMsgM_Icon_MAIN_STICK_e ||
+        icon == fopMsgM_Icon_C_STICK_e ||
+        (icon >= fopMsgM_Icon_MAIN_STICK_UP_e && icon <= fopMsgM_Icon_MAIN_STICK_LEFT_RIGHT_e));
+}
 
 
 void* pc_ui_assets_camera_prompt(const void* original, uint32_t size) {
