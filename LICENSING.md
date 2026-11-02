@@ -4,18 +4,17 @@
 
 ProsperoWake is an independently maintained fork of
 [PS5_SwitchWaker](https://github.com/griches/PS5_SwitchWaker) by griches and its
-contributors. The original PS5 port provides the foundation for this project,
-including its platform integration, build tools and console support.
+contributors. This project retains its platform integration, build tools and
+console support.
 
 Inherited code retains its original licences and copyright notices.
-ProsperoWake's name and independent maintenance do not replace the attribution
-or licence terms of PS5_SwitchWaker or its dependencies.
 
 ## Source licences
 
 The repository as a whole, and any title built from it, is offered under the GNU
 General Public License, version 3 ([`LICENSE`](LICENSE)). Its files come from
-projects under several licences, each compatible with that; individual file headers and the notices below identify the applicable terms.
+projects under several licences. Individual file headers and the notices below
+identify their terms.
 
 | Path | Licence | Text |
 | --- | --- | --- |
@@ -39,7 +38,7 @@ PS5 patches. The SDK and Vulkan stack are prepared separately.
 
 | Part | Project | Licence |
 | --- | --- | --- |
-| The game's code | [SwitchWaker](https://github.com/centollOS/SwitchWaker) (MIT), which compiles the [Wind Waker decompilation fork](https://github.com/snrubrm/tww); part of it comes from an AI-assisted fork (see SwitchWaker's README) | MIT; CC0-1.0 |
+| The game's code | [SwitchWaker](https://github.com/centollOS/SwitchWaker) and the [Wind Waker decompilation fork](https://github.com/snrubrm/tww) | MIT; CC0-1.0 |
 | Sound | Dolphin's DSP HLE, as SwitchWaker uses it | GPL-2.0-or-later |
 | The GameCube layer | [Aurora](https://github.com/encounter/aurora) | MIT |
 | WebGPU | Dawn, at the revision Aurora pins | BSD-3-Clause |
@@ -51,8 +50,8 @@ PS5 patches. The SDK and Vulkan stack are prepared separately.
 
 A built `eboot.bin` links the GPL-3.0 platform layer and Dolphin's
 GPL-2.0-or-later DSP HLE with everything above, so a title as distributed is
-under **GPL-3.0**. The player supplies their own disc image. Original game layouts and camera
-artwork are read from that disc at runtime, not supplied in the controller bundles.
+under **GPL-3.0**. The player supplies their own disc image. Original game layouts
+and camera artwork are read from that disc at runtime.
 
 ## Controller UI
 
@@ -62,7 +61,8 @@ The original PS5 PNGs are bundled in `ps5/assets/controller-ui/xelu/`.
 ProsperoWake generates its button textures and ImGui atlas from those files,
 with its own adjustments to stock game layouts. No third-party mod assets are used.
 The controller bundles contain generated Xelu textures, ProsperoWake zoom arrows
-and layout instructions. The generated arrow artwork is MIT-licensed. Original game layouts and camera-eye artwork are loaded from the
-player's disc and modified in memory. No stock layouts or extracted game artwork
+and layout instructions. The generated arrow artwork is MIT-licensed. Original
+game layouts and camera-eye artwork are loaded from the player's disc and
+modified in memory. No stock layouts or extracted game artwork
 are included in these bundles or their source directory.
 See [asset credits](licenses/Controller-prompts.txt).

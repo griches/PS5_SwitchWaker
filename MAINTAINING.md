@@ -46,12 +46,17 @@ belongs to one patch. SDL, Dawn and Abseil use individual patch files under
 `ps5/patches/`.
 
 Do not edit exported patch bodies or generate them with a plain `git diff`.
-The exporter includes new files and checks that the complete patch series
-reproduces the checkout. Aurora's patches apply after SwitchWaker's Aurora patches.
+The exporter uses full object hashes and includes new files. It checks that the
+patch series reproduces the checkout by comparing file contents. Aurora's series
+applies directly to its pinned revision.
+It includes the retained SwitchWaker fixes; the older series inside SwitchWaker
+is not applied separately.
 
 `check-source.sh` checks source layout, assets, translations, dependency pins and
 patch consistency. It does **not** compile the game or test it on a console.
-Host tests that compile code have separate `check-*.sh` scripts.
+Host tests that compile code have separate `check-*.sh` scripts. Controller input
+regressions run with `python3 -B ps5/tests/controller-input.py`; this compiles a
+small host test with mocked console calls, not the game.
 
 ## Dependency versions
 
@@ -64,6 +69,7 @@ python3 -B ps5/tools/setup-submodules.py --check
 ```
 
 Dependency pins must agree with the versions declared by SwitchWaker and Aurora.
+Setup applies the SwitchWaker overlay before reading its Aurora declaration.
 The Payload SDK is the exception: `ps5/tools/setup-sdk.sh` pins and installs it
 from the separate `PS5_PayloadSDK` checkout. `PS5_Vulkan` supplies the RADV archive,
 link recipe, packaging tool and runtime.
@@ -113,8 +119,8 @@ Normal builds package `res/resources-us.bin`, `res/resources-pal.bin` and
 `res/menu-prompts.rgba`.
 Validation manifests remain in the repository.
 
-The bundles contain Xelu textures, generated zoom arrows and layout instructions, not original game
-layouts or artwork. At runtime, `pc_ui_transform.cpp` edits validated layouts
+The bundles contain Xelu textures, generated zoom arrows and layout instructions.
+At runtime, `pc_ui_transform.cpp` edits matching layouts
 loaded from the player's disc and combines the disc's camera-eye texture with
 the R3 prompt. It leaves the original resources unchanged. The separate host
 check `bash ps5/tools/check-controller-ui.sh` compiles and tests these transforms
@@ -134,8 +140,14 @@ stop any active build and run `bash ps5/tools/build-clean.sh`. It preserves sour
 checkouts and skips directories containing player data.
 
 For a release, build from committed source and test the resulting title on PS5.
-Use `PS5_FULL_PROVENANCE=1 bash ps5/tools/build.sh` to record dependency worktree
-details in `BUILD_INPUTS.json`. Check shader caches when changing shaders or the driver.
+Normal builds record revisions and input hashes in `BUILD_INPUTS.json` without a
+recursive dependency audit. Release packaging requires the checkout to match the
+packaged build and verifies dependency contents against their pins and patches.
+Export and commit dependency edits before building a release.
+The packaging audit checks the current checkout, not past compilation inputs.
+An older binary with an explicitly failed build-time audit must be rebuilt;
+cleaning the checkout alone does not clear that failure. Use the normal build command.
+Check shader caches when changing shaders or the driver.
 
 Each normal build invocation reserves the next number in the build directory's
 `param.json`. The menu and packaged title use that number. Cleaning the build
@@ -162,6 +174,11 @@ GitHub's automatic source archives do not include submodule contents.
 
 ## Other tools
 
+- `build-runner.sh <lima-instance>` starts an optional build runner from macOS.
+  It watches `.build-runner/request`, runs `build.sh` in Lima and shows progress
+  in its terminal. The log and exit status are in `.build-runner/build.log` and
+  `.build-runner/result`. It uses LLVM 22 and the VM's
+  `~/.cache/prosperowake-build` directory by default. Stop it with Ctrl-C.
 - `deploy.sh` uploads the packaged title over FTP using PS5_Vulkan's deployment tool.
 - `run.sh` launches it and captures console logs through PS5_Vulkan.
 - `check-*.sh` runs host tests for individual features; these are separate from normal builds.
@@ -169,5 +186,5 @@ GitHub's automatic source archives do not include submodule contents.
   artwork tool needs Pillow and NumPy; building the game and generating controller
   prompts do not.
 
-Run tools directly in the Linux environment. Set `PS5_VULKAN_DIR`,
+Run the other tools in Linux. Set `PS5_VULKAN_DIR`,
 `PS5_PAYLOAD_SDK_FORK` and `PS5_BUILD_DIR` when using a different directory layout.

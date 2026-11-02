@@ -33,15 +33,16 @@ The texture pack is downloaded separately. You supply your own game image.
 
 The **FX** tab starts on **Original**, with all its effects off. Choose **Enhanced**
 to enable them together, or adjust them individually to switch to **Custom**.
-Enhanced uses Subtle ambient occlusion, Low sharpening and Vivid colours. Ambient occlusion is experimental; cloud shadows are procedural rather
-than exact shadows of the visible clouds.
+Enhanced uses Subtle ambient occlusion, Low sharpening and Vivid colours.
+Ambient occlusion is experimental. Cloud shadows follow wind and cloud cover;
+they do not match individual clouds.
 
 ### Controls
 
 - **PlayStation prompts** throughout the HUD and file-select screens, included with the port.
 - **Right-stick camera and aiming**, with left-stick zoom for the telescope and Picto Box.
 - **R3 first-person view**, **L1 jump** and **L3 sprint** with adjustable speed.
-- **D-pad inventory navigation**, shared horizontal and vertical inversion for the camera and aiming.
+- **D-pad inventory navigation** and shared camera/aiming inversion settings.
 - **Controller vibration** with Original and Enhanced modes, plus adjustable strength for Enhanced. The game’s own vibration setting must also be on.
 
 Camera and aiming follow the stick direction by default. The two inversion
@@ -217,11 +218,20 @@ and builds **`dist/PPSA99309/`**. No disc image is needed to build, and no regio
 argument is needed: the executable detects USA or PAL at launch. Controller
 assets are included in the repository; a normal build does not regenerate them.
 
-On Lima, run `export PS5_BUILD_DIR="$HOME/.cache/prosperowake-build"` before building
-to keep build output on the VM’s Linux disk. For a clean rebuild, stop any active build and
-run `bash ps5/tools/build-clean.sh` first.
+On Lima, keep build output on the VM’s Linux disk and select the LLVM 22 toolchain:
 
-To package a tested build made from committed source:
+```sh
+export PS5_BUILD_DIR="$HOME/.cache/prosperowake-build"
+export PS5_CLANG=/usr/bin/clang-22
+export LLVM_CONFIG=/usr/bin/llvm-config-22
+bash ps5/tools/build.sh
+```
+
+For a clean rebuild, stop any active build and run `bash ps5/tools/build-clean.sh`
+first. This removes local build output and packages, while keeping source
+checkouts and directories containing player data.
+
+To package a build made from committed source:
 
 ```sh
 bash ps5/tools/package-release.sh
@@ -235,7 +245,7 @@ See the [maintenance guide](MAINTAINING.md) for dependencies, patches and releas
 ## Credits
 
 - **[PS5_SwitchWaker](https://github.com/griches/PS5_SwitchWaker)** by griches and its contributors, for the original PS5 port.
-- [SwitchWaker](https://github.com/centollOS/SwitchWaker) and the Wind Waker decompilation community, for the native game foundation.
+- [SwitchWaker](https://github.com/centollOS/SwitchWaker) and the Wind Waker decompilation community, for the native game code.
 - [Bluewake](https://github.com/chrissotraidis/bluewake) and [Better Wind Waker](https://github.com/WideBoner/betterww) for improvements adapted here.
 - Aurora, Dawn and the PS5 Vulkan, Mesa and Payload SDK projects.
 - [Xelu](https://thoseawesomeguys.com/prompts/) for the PlayStation button prompts. [Asset credits](licenses/Controller-prompts.txt).
